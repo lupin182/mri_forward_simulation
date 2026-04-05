@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom
-from reconn import reconstruct_image_fft, reconstruct_image
+from recon import reconstruct_image_fft, reconstruct_image
 from Sequence.write_gre_label import write_gre_label_sequence
 from Sequence.write_epi import write_epi_sequence
 from simulate import SimulationConfig, simulate
