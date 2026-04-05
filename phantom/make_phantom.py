@@ -19,6 +19,10 @@ def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     t1 = np.ones((Nz, Nx, Ny)) * 2.0
     t2 = np.ones((Nz, Nx, Ny)) * 0.005
 
+    rho[1,5:10,5:10] = 3.0
+    t1[1,5:10,5:10] = 1.0
+    t2[1,5:10,5:10] = 0.05
+
     # 2. 生成坐标网格 (注意这里为了生成数据，我们严格按照 Nz, Nx, Ny 顺序)
     # 这里的 x_idx 对应 Nx 维度，y_idx 对应 Ny 维度
     _, x, y = np.meshgrid(

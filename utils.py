@@ -137,8 +137,45 @@ def get_block_gradient_areas(block) -> tuple[float, float, float]:
     )
 
 
-def sample_rf_signal(rf, t):
-    """Sample the RF waveform at time ``t`` and apply phase/frequency offsets."""
+def get_rf_frequency_offset_hz(
+    rf,
+    *,
+    gamma_hz: float | None = None,
+    system_b0_t: float | None = None,
+) -> float:
+    """Return the full RF carrier frequency offset in Hz."""
+    # NEW: Read the explicit PyPulseq RF carrier frequency offset from the block RF event.
+    freq_offset_hz = float(getattr(rf, "freq_offset", 0.0)) if rf is not None else 0.0
+    # NEW: Match PyPulseq's ppm handling when the sequence system B0 is known.
+    if rf is not None and gamma_hz is not None and system_b0_t is not None:
+        freq_offset_hz += float(getattr(rf, "freq_ppm", 0.0)) * 1e-6 * float(gamma_hz) * float(system_b0_t)
+    return freq_offset_hz
+
+
+def get_rf_phase_offset_rad(
+    rf,
+    *,
+    gamma_hz: float | None = None,
+    system_b0_t: float | None = None,
+) -> float:
+    """Return the full RF phase offset in radians."""
+    # NEW: Keep the static RF phase offset separate from the carrier-frequency term.
+    phase_offset_rad = float(getattr(rf, "phase_offset", 0.0)) if rf is not None else 0.0
+    # NEW: Match PyPulseq's ppm handling when the sequence system B0 is known.
+    if rf is not None and gamma_hz is not None and system_b0_t is not None:
+        phase_offset_rad += float(getattr(rf, "phase_ppm", 0.0)) * 1e-6 * float(gamma_hz) * float(system_b0_t)
+    return phase_offset_rad
+
+
+def sample_rf_signal(
+    rf,
+    t,
+    *,
+    include_freq_offset_phase: bool = True,
+    gamma_hz: float | None = None,
+    system_b0_t: float | None = None,
+):
+    """Sample the RF waveform at time ``t`` and apply RF phase controls."""
     t_array = np.asarray(t, dtype=np.float64)
     signal = np.zeros_like(t_array, dtype=np.complex128)
     is_array_input = np.ndim(t_array) > 0
@@ -158,7 +195,17 @@ def sample_rf_signal(rf, t):
 
     indices = np.floor(local_time[active_mask] / rf_dt).astype(int)
     indices = np.clip(indices, 0, len(rf.signal) - 1)
-    phase = float(rf.phase_offset) + 2.0 * np.pi * float(rf.freq_offset) * local_time[active_mask]
+    # MOD: Keep RF phase offset handling explicit so the simulator can move the
+    # MOD: RF carrier into the Bloch off-resonance term for slice selection.
+    phase = get_rf_phase_offset_rad(rf, gamma_hz=gamma_hz, system_b0_t=system_b0_t)
+    # NEW: Preserve the old behaviour for callers that still want the RF carrier
+    # NEW: encoded directly in the complex RF waveform.
+    if include_freq_offset_phase:
+        phase += 2.0 * np.pi * get_rf_frequency_offset_hz(
+            rf,
+            gamma_hz=gamma_hz,
+            system_b0_t=system_b0_t,
+        ) * local_time[active_mask]
     signal[active_mask] = np.asarray(rf.signal, dtype=np.complex128)[indices] * np.exp(1j * phase)
     return signal if is_array_input else complex(signal.item())
 

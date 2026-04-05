@@ -13,6 +13,7 @@ from utils import (
     get_adc_sample_times,
     get_block_gradient_areas,
     get_gradient_amplitude,
+    get_rf_frequency_offset_hz,
     preprocess_phantom,
     sample_rf_signal,
 )
@@ -24,6 +25,7 @@ BlockSolvePath = Literal["fine", "fast"]
 class SimulationConfig:
     fine_dt: float = 1e-6
     demodulate_adc: bool = True
+    reset_transverse_on_slice_change: bool = True
 
 
 @dataclass(slots=True)
@@ -78,6 +80,23 @@ def _build_static_off_resonance(phantom: Phantom, gamma_hz: float) -> np.ndarray
     )
 
 
+def _rotate_transverse_state(mx: np.ndarray, my: np.ndarray, phase_rad: float) -> None:
+    """Rotate transverse magnetization in-place around the z-axis."""
+    # NEW: Used to enter and leave the RF-carrier rotating frame during RF support.
+    if abs(phase_rad) <= 1e-15:
+        return
+
+    mxy = (mx + 1j * my) * np.exp(1j * phase_rad)
+    mx[:] = np.real(mxy)
+    my[:] = np.imag(mxy)
+
+
+def _is_excitation_block(block) -> bool:
+    """Return True when the block contains an excitation RF event."""
+    rf = getattr(block, "rf", None)
+    return rf is not None and getattr(rf, "use", "undefined") in ("excitation", "undefined")
+
+
 def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
     """Exact free precession and relaxation for a block without RF or ADC."""
     duration = float(block.block_duration)
@@ -97,6 +116,35 @@ def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
     phantom.Mx[:] = np.real(mxy)
     phantom.My[:] = np.imag(mxy)
     phantom.Mz[:] = phantom.Mz * e1 + phantom.rho * (1.0 - e1)
+
+
+def _maybe_reset_transverse_for_slice_change(
+    phantom: Phantom,
+    block,
+    previous_excitation_freq_hz: float | None,
+    *,
+    enabled: bool,
+) -> float | None:
+    """Reset residual transverse magnetization when the sequence switches slices.
+
+    The current forward model tracks one isochromat per voxel, so gradient
+    spoilers cannot fully represent the intravoxel dephasing that normally
+    suppresses signal from earlier slices. When excitation RF blocks switch to a
+    new `freq_offset`, clear the previous slice's residual transverse state to
+    avoid cross-slice contamination in later readouts.
+    """
+    if not _is_excitation_block(block):
+        return previous_excitation_freq_hz
+
+    current_excitation_freq_hz = float(getattr(block.rf, "freq_offset", 0.0))
+    if (
+        enabled
+        and previous_excitation_freq_hz is not None
+        and not np.isclose(current_excitation_freq_hz, previous_excitation_freq_hz, atol=1e-9, rtol=0.0)
+    ):
+        phantom.Mx[:] = 0.0
+        phantom.My[:] = 0.0
+    return current_excitation_freq_hz
 
 
 def _readout_signal(
@@ -125,6 +173,7 @@ def _simulate_fine_block(
     phantom: Phantom,
     block,
     gamma_hz: float,
+    system_b0_t: float,
     config: SimulationConfig,
 ) -> tuple[list[complex], int]:
     """Numerically integrate a block using a refined time grid."""
@@ -138,6 +187,15 @@ def _simulate_fine_block(
     x_scale = TWO_PI * phantom.x
     y_scale = TWO_PI * phantom.y
     z_scale = TWO_PI * phantom.z
+    rf_event = getattr(block, "rf", None)
+    # NEW: Read the RF carrier once per block and handle it as an effective detuning.
+    rf_carrier_hz = get_rf_frequency_offset_hz(rf_event, gamma_hz=gamma_hz, system_b0_t=system_b0_t)
+    rf_support_start = float(getattr(rf_event, "delay", 0.0)) if rf_event is not None else 0.0
+    rf_support_stop = (
+        float(getattr(rf_event, "delay", 0.0) + getattr(rf_event, "shape_dur", 0.0))
+        if rf_event is not None
+        else 0.0
+    )
 
     for start, stop in zip(time_grid[:-1], time_grid[1:]):
         dt = float(stop - start)
@@ -150,7 +208,30 @@ def _simulate_fine_block(
         gz_amp = get_gradient_amplitude(getattr(block, "gz", None), mid_time)
 
         off_resonance = static_off_resonance + gx_amp * x_scale + gy_amp * y_scale + gz_amp * z_scale
-        rf_sample = sample_rf_signal(getattr(block, "rf", None), mid_time)
+        # MOD: Sample the RF envelope in baseband so the carrier is represented by
+        # MOD: the effective off-resonance term instead of a phase-modulated B1.
+        rf_sample = sample_rf_signal(
+            rf_event,
+            mid_time,
+            include_freq_offset_phase=False,
+            gamma_hz=gamma_hz,
+            system_b0_t=system_b0_t,
+        )
+        # NEW: Restrict the rotating-frame transform to the actual RF support window.
+        rf_step_active = (
+            rf_event is not None
+            and start >= rf_support_start - 1e-15
+            and stop <= rf_support_stop + 1e-15
+        )
+        if rf_step_active and abs(rf_carrier_hz) > 0.0:
+            # NEW: Enter the RF carrier frame at the start of the sub-step.
+            _rotate_transverse_state(
+                phantom.Mx,
+                phantom.My,
+                -TWO_PI * rf_carrier_hz * (start - rf_support_start),
+            )
+            # NEW: In the RF frame, the effective detuning is spin offset minus RF carrier.
+            off_resonance = off_resonance - TWO_PI * rf_carrier_hz
 
         apply_bloch_step(
             rho=phantom.rho,
@@ -165,6 +246,13 @@ def _simulate_fine_block(
             tx_coil_magnitude=phantom.txCoilmg,
             tx_coil_phase=phantom.txCoilpe,
         )
+        if rf_step_active and abs(rf_carrier_hz) > 0.0:
+            # NEW: Return to the simulator's main rotating frame after the RF sub-step.
+            _rotate_transverse_state(
+                phantom.Mx,
+                phantom.My,
+                TWO_PI * rf_carrier_hz * (stop - rf_support_start),
+            )
 
         while adc_cursor < len(adc_sample_times) and np.isclose(adc_sample_times[adc_cursor], stop, atol=1e-12, rtol=0.0):
             adc_samples.append(
@@ -198,14 +286,23 @@ def simulate(
 
     phantom_state = preprocess_phantom(phantom)
     gamma_hz = float(getattr(sequence.system, "gamma", getattr(phantom_state, "Gyro", 42.576e6)))
+    # NEW: PyPulseq ppm offsets are defined relative to the sequence system B0.
+    system_b0_t = float(getattr(sequence.system, "B0", 0.0))
 
     summaries = analyze_sequence_blocks(sequence)
     collected_signal: list[complex] = []
+    previous_excitation_freq_hz: float | None = None
 
     for summary in summaries:
         block = sequence.get_block(summary.index)
+        previous_excitation_freq_hz = _maybe_reset_transverse_for_slice_change(
+            phantom_state,
+            block,
+            previous_excitation_freq_hz,
+            enabled=config.reset_transverse_on_slice_change,
+        )
         if summary.solve_path == "fine":
-            block_signal, num_steps = _simulate_fine_block(phantom_state, block, gamma_hz, config)
+            block_signal, num_steps = _simulate_fine_block(phantom_state, block, gamma_hz, system_b0_t, config)
             collected_signal.extend(block_signal)
             summary.num_steps = num_steps
             summary.num_adc_samples = len(block_signal)

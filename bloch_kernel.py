@@ -174,9 +174,9 @@ def BlochKernel(
 ):
     """Backward-compatible wrapper around the new Bloch step implementation.
 
-    ``rfFreq`` is folded into the RF phase at the middle of the time step.
-    The block-driven simulator samples RF phase modulation explicitly and does
-    not rely on this approximation.
+    ``rfFreq`` is treated as an RF carrier detuning term and is subtracted from
+    the effective spin off-resonance, matching the physical handling used by
+    the block-driven simulator for PyPulseq RF ``freq_offset``.
     """
     del TxCoilNum
 
@@ -187,7 +187,9 @@ def BlochKernel(
     if rf_amp.size == 0:
         rf_hz = 0.0j
     else:
-        rf_hz = rf_amp * np.exp(1j * (rf_phase + TWO_PI * rf_freq * (0.5 * dt)))
+        # MOD: Keep the RF waveform in baseband and represent the carrier in the
+        # MOD: effective off-resonance term below.
+        rf_hz = rf_amp * np.exp(1j * rf_phase)
 
     off_resonance = build_off_resonance_rad_s(
         gamma_hz=float(Gyro),
@@ -201,6 +203,9 @@ def BlochKernel(
         gy_hz_per_m=float(GyAmp),
         gx_hz_per_m=float(GxAmp),
     )
+    # NEW: Apply the RF carrier as a detuning shift in the legacy dense-kernel path.
+    rf_carrier_hz = float(rf_freq[0]) if rf_freq.size > 0 else 0.0
+    off_resonance = off_resonance - TWO_PI * rf_carrier_hz
 
     return apply_bloch_step(
         rho=np.asarray(Rho, dtype=np.float64),

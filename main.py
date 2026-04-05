@@ -17,6 +17,7 @@ def main() -> None:
 
     # The current forward model uses one isochromat per voxel, so RF spoiling
     # creates stronger artifacts than a scanner would. Disable it for the demo.
+    '''
     seq = write_gre_label_sequence(
         n_x=64,
         n_y=64,
@@ -27,6 +28,7 @@ def main() -> None:
         n_slices=1,
         rf_spoiling_inc_deg=0.0,
     )
+    '''
     seq = write_epi_sequence(n_y=64, n_slices=3)
     #seq = write_se_sequence(n_y=64)
     
@@ -38,13 +40,14 @@ def main() -> None:
     plt.figure(figsize=(10, 10))
     plt.subplot(121)
     plt.title("GRE Reconstruction")
-    plt.imshow(np.abs(image_recon[0]), cmap='gray')
+    plt.imshow(np.abs(image_recon[1]), cmap='gray')
     plt.axis('off')
 
     plt.subplot(122)
     plt.title("Original")
     plt.imshow(np.abs(image_recon[2]),  cmap='gray')
     plt.axis('off')
+
 
     plt.tight_layout()
     plt.show()
