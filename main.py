@@ -4,8 +4,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom
-from reconn import reconstruct_image_fft
+from reconn import reconstruct_image_fft, reconstruct_image
 from Sequence.write_gre_label import write_gre_label_sequence
+from Sequence.write_epi import write_epi_sequence
 from simulate import SimulationConfig, simulate
 
 
@@ -25,9 +26,12 @@ def main() -> None:
         n_slices=1,
         rf_spoiling_inc_deg=0.0,
     )
-    k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=2e-5))
-    image_recon, _ = reconstruct_image_fft(k_space_signal, Ny=64, Nx=64)
+    #seq = write_epi_sequence(n_y=64)
+    k_traj_adc,_,_,_,_ = seq.calculate_kspace()
 
+    k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
+    #image_recon, _ = reconstruct_image_fft(k_space_signal, Ny=64, Nx=64)
+    image_recon = reconstruct_image(k_space_signal, k_traj_adc)
     plt.figure(figsize=(10, 10))
     plt.subplot(121)
     plt.title("GRE Reconstruction")

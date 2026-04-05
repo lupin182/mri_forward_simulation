@@ -47,7 +47,7 @@ def write_epi_sequence(
 
     # Set system limits
     system = pp.Opts(
-        max_grad=3200,
+        max_grad=320,
         grad_unit='mT/m',
         max_slew=130,
         slew_unit='T/m/s',
