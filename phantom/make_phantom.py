@@ -42,7 +42,7 @@ def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     rho[mask_main] = 1.0
     t1[mask_main]  = 1.0
     t2[mask_main]  = 0.1
-    
+
     # 标记物：高亮油点 (Rho=2.0, T1=0.5, T2=0.05 - 短T1更亮(在短TR下), 短T2)
     rho[mask_marker] = 2.0 
     t1[mask_marker]  = 0.5 
