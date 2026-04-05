@@ -18,6 +18,8 @@ def write_gre_label_sequence(
     te: float = 4.3e-3,
     tr: float = 10e-3,
     readout_duration: float = 3.2e-3,
+    rf_spoiling_inc_deg: float = 117.0,
+    dummy_scans: int = 0,
 ):
     """Create a GRE sequence with labels for data header control.
 
@@ -59,7 +61,7 @@ def write_gre_label_sequence(
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
     if n_y is None:
         n_y = n_x
-    rf_spoiling_inc = 117
+    rf_spoiling_inc = rf_spoiling_inc_deg
 
     # Set system limits
     system = pp.Opts(
@@ -114,29 +116,38 @@ def write_gre_label_sequence(
 
     seq.add_block(pp.make_label(label='REV', type='SET', value=1))
 
+    def add_tr(phase_area: float, acquire: bool, labels=()) -> None:
+        nonlocal rf_phase, rf_inc
+        rf.phase_offset = rf_phase / 180 * np.pi
+        adc.phase_offset = rf_phase / 180 * np.pi
+        rf_inc = divmod(rf_inc + rf_spoiling_inc, 360.0)[1]
+        rf_phase = divmod(rf_phase + rf_inc, 360.0)[1]
+
+        seq.add_block(rf, gz)
+        gy_pre = pp.make_trapezoid(
+            channel='y',
+            area=phase_area,
+            duration=pp.calc_duration(gx_pre),
+            system=system,
+        )
+        seq.add_block(gx_pre, gy_pre, gz_reph)
+        seq.add_block(pp.make_delay(te_delay))
+        if acquire:
+            seq.add_block(gx, adc)
+        else:
+            seq.add_block(gx)
+        gy_pre.amplitude = -gy_pre.amplitude
+        seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil, *labels)
+
     # Loop over slices
     for i_slice in range(n_slices):
         rf.freq_offset = gz.amplitude * slice_thickness * (i_slice - (n_slices - 1) / 2)
+
+        for _ in range(dummy_scans):
+            add_tr(0.0, acquire=False)
+
         # Loop over phase encodes and define sequence blocks
         for i_phase in range(n_y):
-            rf.phase_offset = rf_phase / 180 * np.pi
-            adc.phase_offset = rf_phase / 180 * np.pi
-            rf_inc = divmod(rf_inc + rf_spoiling_inc, 360.0)[1]
-            rf_phase = divmod(rf_phase + rf_inc, 360.0)[1]
-
-            seq.add_block(rf, gz)
-            gy_pre = pp.make_trapezoid(
-                channel='y',
-                area=phase_areas[i_phase],
-                duration=pp.calc_duration(gx_pre),
-                system=system,
-            )
-            seq.add_block(gx_pre, gy_pre, gz_reph)
-            seq.add_block(pp.make_delay(te_delay))
-            seq.add_block(gx, adc)
-            gy_pre.amplitude = -gy_pre.amplitude
-
-            # Create labels
             if i_phase != n_y - 1:
                 labels = [pp.make_label(type='INC', label='LIN', value=1)]
             else:
@@ -144,8 +155,7 @@ def write_gre_label_sequence(
                     pp.make_label(type='SET', label='LIN', value=0),
                     pp.make_label(type='INC', label='SLC', value=1),
                 ]
-
-            seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil, *labels)
+            add_tr(float(phase_areas[i_phase]), acquire=True, labels=labels)
 
     ok, error_report = seq.check_timing()
 

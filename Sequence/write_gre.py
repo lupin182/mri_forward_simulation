@@ -14,6 +14,8 @@ def write_gre_sequence(
     slice_thickness: float = 3e-3,
     tr: float = 12e-3,
     te: float = 5e-3,
+    rf_spoiling_inc_deg: float = 117.0,
+    dummy_scans: int = 0,
 ):
     """Create a basic gradient echo (GRE) sequence.
 
@@ -49,7 +51,7 @@ def write_gre_sequence(
         The GRE sequence object.
     """
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
-    rf_spoiling_inc = 117
+    rf_spoiling_inc = rf_spoiling_inc_deg
 
     # Set system limits
     system = pp.Opts(
@@ -109,8 +111,8 @@ def write_gre_sequence(
     rf_phase = 0
     rf_inc = 0
 
-    # Loop over phase encodes and define sequence blocks
-    for i_phase in range(n_y):
+    def add_tr(phase_area: float, acquire: bool) -> None:
+        nonlocal rf_phase, rf_inc
         rf.phase_offset = rf_phase / 180 * np.pi
         adc.phase_offset = rf_phase / 180 * np.pi
         rf_inc = divmod(rf_inc + rf_spoiling_inc, 360.0)[1]
@@ -119,15 +121,25 @@ def write_gre_sequence(
         seq.add_block(rf, gz)
         gy_pre = pp.make_trapezoid(
             channel='y',
-            area=phase_areas[i_phase],
+            area=phase_area,
             duration=pp.calc_duration(gx_pre),
             system=system,
         )
         seq.add_block(gx_pre, gy_pre, gz_reph)
         seq.add_block(pp.make_delay(te_delay))
-        seq.add_block(gx, adc)
+        if acquire:
+            seq.add_block(gx, adc)
+        else:
+            seq.add_block(gx)
         gy_pre.amplitude = -gy_pre.amplitude
         seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil)
+
+    for _ in range(dummy_scans):
+        add_tr(0.0, acquire=False)
+
+    # Loop over phase encodes and define sequence blocks
+    for i_phase in range(n_y):
+        add_tr(float(phase_areas[i_phase]), acquire=True)
 
     ok, error_report = seq.check_timing()
     if ok:

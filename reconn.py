@@ -1,5 +1,4 @@
 import numpy as np
-import sigpy as sp
 import matplotlib.pyplot as plt
 
 def reconstruct_image(k_space_signal, k_traj_adc, fov_x=220e-3, fov_y=220e-3, Nx=64, Ny=64):
@@ -40,6 +39,8 @@ def reconstruct_image(k_space_signal, k_traj_adc, fov_x=220e-3, fov_y=220e-3, Nx
     
     # 6. 调用 NUFFT 的伴随算子 (Adjoint NUFFT)
     # 这相当于先在 K 空间把散乱的点“网格化(Gridding)”到标准的 64x64 网格上，然后再做 2D-IFFT
+    import sigpy as sp
+
     image = sp.nufft_adjoint(k_space_signal, k_locs_sigpy, img_shape)
     
     print("重建完成！")
