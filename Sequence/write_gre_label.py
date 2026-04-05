@@ -20,6 +20,7 @@ def write_gre_label_sequence(
     readout_duration: float = 3.2e-3,
     rf_spoiling_inc_deg: float = 117.0,
     dummy_scans: int = 0,
+    ideal_spoiling_reset: bool = False,
 ):
     """Create a GRE sequence with labels for data header control.
 
@@ -52,6 +53,9 @@ def write_gre_label_sequence(
         Repetition time in seconds. Default is 10e-3.
     readout_duration : float, optional
         ADC readout duration in seconds. Default is 3.2e-3.
+    ideal_spoiling_reset : bool, optional
+        When True, add a PyPulseq label on the TR spoiler block so the simulator
+        can enforce ideal spoiling by zeroing transverse magnetization there.
 
     Returns
     -------
@@ -137,7 +141,10 @@ def write_gre_label_sequence(
         else:
             seq.add_block(gx)
         gy_pre.amplitude = -gy_pre.amplitude
-        seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil, *labels)
+        spoil_labels = list(labels)
+        if ideal_spoiling_reset:
+            spoil_labels.append(pp.make_label(label='TRID', type='INC', value=1))
+        seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil, *spoil_labels)
 
     # Loop over slices
     for i_slice in range(n_slices):

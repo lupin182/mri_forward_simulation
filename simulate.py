@@ -26,6 +26,7 @@ class SimulationConfig:
     fine_dt: float = 1e-6
     demodulate_adc: bool = True
     reset_transverse_on_slice_change: bool = True
+    reset_transverse_on_ideal_spoil_label: bool = True
 
 
 @dataclass(slots=True)
@@ -95,6 +96,34 @@ def _is_excitation_block(block) -> bool:
     """Return True when the block contains an excitation RF event."""
     rf = getattr(block, "rf", None)
     return rf is not None and getattr(rf, "use", "undefined") in ("excitation", "undefined")
+
+
+def _block_has_label(block, label_name: str) -> bool:
+    """Return True when the block contains a PyPulseq label with the requested name."""
+    labels = getattr(block, "label", None)
+    if labels is None:
+        return False
+    return any(getattr(label, "label", None) == label_name for label in labels.values())
+
+
+def _maybe_reset_transverse_for_ideal_spoiling(
+    phantom: Phantom,
+    block,
+    *,
+    enabled: bool,
+) -> None:
+    """Apply an idealized spoiler when the sequence explicitly marks the block.
+
+    GRE sequences in this project use one isochromat per voxel, so gradient and
+    RF spoiling cannot fully reproduce intravoxel dephasing. A `TRID` label on a
+    spoiler block is treated as an explicit request to zero transverse
+    magnetization at that time point.
+    """
+    if not enabled or not _block_has_label(block, "TRID"):
+        return
+
+    phantom.Mx[:] = 0.0
+    phantom.My[:] = 0.0
 
 
 def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
@@ -295,6 +324,11 @@ def simulate(
 
     for summary in summaries:
         block = sequence.get_block(summary.index)
+        _maybe_reset_transverse_for_ideal_spoiling(
+            phantom_state,
+            block,
+            enabled=config.reset_transverse_on_ideal_spoil_label,
+        )
         previous_excitation_freq_hz = _maybe_reset_transverse_for_slice_change(
             phantom_state,
             block,
