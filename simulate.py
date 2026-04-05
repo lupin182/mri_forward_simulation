@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+import numpy as np
+import pypulseq as pp
+
+from bloch_kernel import TWO_PI, apply_bloch_step, build_off_resonance_rad_s
+from phantom.make_phantom import Phantom
+from utils import (
+    build_time_grid,
+    get_adc_sample_times,
+    get_block_gradient_areas,
+    get_gradient_amplitude,
+    preprocess_phantom,
+    sample_rf_signal,
+)
+
+BlockSolvePath = Literal["fine", "fast"]
+
+
+@dataclass(slots=True)
+class SimulationConfig:
+    fine_dt: float = 1e-6
+    demodulate_adc: bool = True
+
+
+@dataclass(slots=True)
+class BlockSummary:
+    index: int
+    duration: float
+    has_rf: bool
+    has_adc: bool
+    solve_path: BlockSolvePath
+    num_steps: int = 0
+    num_adc_samples: int = 0
+
+
+@dataclass(slots=True)
+class SimulationResult:
+    signal: np.ndarray
+    adc_times: np.ndarray
+    block_summaries: list[BlockSummary]
+
+
+def classify_block(block) -> BlockSolvePath:
+    """Route RF/ADC blocks to the fine path and all others to the fast path."""
+    return "fine" if getattr(block, "rf", None) is not None or getattr(block, "adc", None) is not None else "fast"
+
+
+def analyze_sequence_blocks(sequence: pp.Sequence) -> list[BlockSummary]:
+    """Return per-block metadata used by the simulator and by tests."""
+    summaries: list[BlockSummary] = []
+    for block_idx in range(1, len(sequence.block_durations) + 1):
+        block = sequence.get_block(block_idx)
+        summaries.append(
+            BlockSummary(
+                index=block_idx,
+                duration=float(block.block_duration),
+                has_rf=getattr(block, "rf", None) is not None,
+                has_adc=getattr(block, "adc", None) is not None,
+                solve_path=classify_block(block),
+            )
+        )
+    return summaries
+
+
+def _build_static_off_resonance(phantom: Phantom, gamma_hz: float) -> np.ndarray:
+    return build_off_resonance_rad_s(
+        gamma_hz=gamma_hz,
+        chemical_shift_hz=phantom.CS,
+        dB0_t=phantom.dB0,
+        dwrnd_rad_s=phantom.dWRnd,
+        x_m=phantom.x,
+        y_m=phantom.y,
+        z_m=phantom.z,
+    )
+
+
+def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
+    """Exact free precession and relaxation for a block without RF or ADC."""
+    duration = float(block.block_duration)
+    if duration <= 0:
+        return
+
+    gx_area, gy_area, gz_area = get_block_gradient_areas(block)
+    total_phase = duration * phantom.dWRnd
+    total_phase += TWO_PI * duration * phantom.CS
+    total_phase += TWO_PI * duration * gamma_hz * phantom.dB0
+    total_phase += TWO_PI * (gx_area * phantom.x + gy_area * phantom.y + gz_area * phantom.z)
+
+    e2 = np.exp(-duration / np.maximum(phantom.t2, 1e-12))
+    e1 = np.exp(-duration / np.maximum(phantom.t1, 1e-12))
+    mxy = (phantom.Mx + 1j * phantom.My) * e2 * np.exp(-1j * total_phase)
+
+    phantom.Mx[:] = np.real(mxy)
+    phantom.My[:] = np.imag(mxy)
+    phantom.Mz[:] = phantom.Mz * e1 + phantom.rho * (1.0 - e1)
+
+
+def _readout_signal(
+    phantom: Phantom,
+    adc,
+    sample_idx: int,
+    sample_time: float,
+    *,
+    demodulate_adc: bool,
+) -> complex:
+    mxy = phantom.Mx + 1j * phantom.My
+    rx_weight = phantom.rxCoilmg * np.exp(-1j * phantom.rxCoilpe)
+    coil_signal = np.sum(rx_weight * mxy[None, :], axis=1)
+    signal = complex(np.sum(coil_signal))
+
+    if not demodulate_adc or adc is None:
+        return signal
+
+    phase = float(adc.phase_offset) + TWO_PI * float(adc.freq_offset) * sample_time
+    if getattr(adc, "phase_modulation", None) is not None and len(adc.phase_modulation) > sample_idx:
+        phase += float(adc.phase_modulation[sample_idx])
+    return signal * np.exp(-1j * phase)
+
+
+def _simulate_fine_block(
+    phantom: Phantom,
+    block,
+    gamma_hz: float,
+    config: SimulationConfig,
+) -> tuple[list[complex], int]:
+    """Numerically integrate a block using a refined time grid."""
+    time_grid = build_time_grid(block, config.fine_dt)
+    adc_sample_times = get_adc_sample_times(getattr(block, "adc", None))
+    adc_samples: list[complex] = []
+    adc_cursor = 0
+    num_steps = max(0, len(time_grid) - 1)
+
+    static_off_resonance = _build_static_off_resonance(phantom, gamma_hz)
+    x_scale = TWO_PI * phantom.x
+    y_scale = TWO_PI * phantom.y
+    z_scale = TWO_PI * phantom.z
+
+    for start, stop in zip(time_grid[:-1], time_grid[1:]):
+        dt = float(stop - start)
+        if dt <= 0:
+            continue
+
+        mid_time = 0.5 * (start + stop)
+        gx_amp = get_gradient_amplitude(getattr(block, "gx", None), mid_time)
+        gy_amp = get_gradient_amplitude(getattr(block, "gy", None), mid_time)
+        gz_amp = get_gradient_amplitude(getattr(block, "gz", None), mid_time)
+
+        off_resonance = static_off_resonance + gx_amp * x_scale + gy_amp * y_scale + gz_amp * z_scale
+        rf_sample = sample_rf_signal(getattr(block, "rf", None), mid_time)
+
+        apply_bloch_step(
+            rho=phantom.rho,
+            t1=phantom.t1,
+            t2=phantom.t2,
+            mx=phantom.Mx,
+            my=phantom.My,
+            mz=phantom.Mz,
+            off_resonance_rad_s=off_resonance,
+            dt_s=dt,
+            rf_hz=rf_sample,
+            tx_coil_magnitude=phantom.txCoilmg,
+            tx_coil_phase=phantom.txCoilpe,
+        )
+
+        while adc_cursor < len(adc_sample_times) and np.isclose(adc_sample_times[adc_cursor], stop, atol=1e-12, rtol=0.0):
+            adc_samples.append(
+                _readout_signal(
+                    phantom,
+                    getattr(block, "adc", None),
+                    adc_cursor,
+                    float(adc_sample_times[adc_cursor]),
+                    demodulate_adc=config.demodulate_adc,
+                )
+            )
+            adc_cursor += 1
+
+    return adc_samples, num_steps
+
+
+def simulate(
+    phantom: Phantom,
+    sequence: pp.Sequence,
+    config: SimulationConfig | None = None,
+    *,
+    return_details: bool = False,
+):
+    """Run the forward simulation using block-wise routing.
+
+    RF- and ADC-containing blocks use a refined numerical update. All remaining
+    blocks use a closed-form free-precession update based on gradient areas.
+    """
+    if config is None:
+        config = SimulationConfig()
+
+    phantom_state = preprocess_phantom(phantom)
+    gamma_hz = float(getattr(sequence.system, "gamma", getattr(phantom_state, "Gyro", 42.576e6)))
+
+    summaries = analyze_sequence_blocks(sequence)
+    collected_signal: list[complex] = []
+
+    for summary in summaries:
+        block = sequence.get_block(summary.index)
+        if summary.solve_path == "fine":
+            block_signal, num_steps = _simulate_fine_block(phantom_state, block, gamma_hz, config)
+            collected_signal.extend(block_signal)
+            summary.num_steps = num_steps
+            summary.num_adc_samples = len(block_signal)
+        else:
+            _apply_fast_block(phantom_state, block, gamma_hz)
+            summary.num_steps = 1 if summary.duration > 0 else 0
+
+    signal = np.asarray(collected_signal, dtype=np.complex128)
+    if return_details:
+        adc_times, _ = sequence.adc_times()
+        return SimulationResult(signal=signal, adc_times=adc_times, block_summaries=summaries)
+    return signal
