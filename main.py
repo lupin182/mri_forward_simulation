@@ -7,6 +7,7 @@ from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom
 from recon import reconstruct_image_fft, reconstruct_image
 from Sequence.write_gre_label import write_gre_label_sequence
 from Sequence.write_epi import write_epi_sequence
+from Sequence.write_se import write_se_sequence
 from simulate import SimulationConfig, simulate
 
 
@@ -27,6 +28,8 @@ def main() -> None:
         rf_spoiling_inc_deg=0.0,
     )
     #seq = write_epi_sequence(n_y=64)
+    seq = write_se_sequence(n_y=64)
+    
     k_traj_adc,_,_,_,_ = seq.calculate_kspace()
 
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
