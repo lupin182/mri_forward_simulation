@@ -228,7 +228,7 @@ def _get_gradient_boundaries(grad) -> list[float]:
             float(grad.delay + grad.rise_time + grad.flat_time + grad.fall_time),
         ]
 
-    sample_times = np.asarray(getattr(grad, "tt", getattr(grad, "tt")), dtype=np.float64)
+    sample_times = np.asarray(getattr(grad, "tt", getattr(grad, "t")), dtype=np.float64)
     if sample_times.size == 0:
         return [float(grad.delay), float(grad.delay + grad.shape_dur)]
     if sample_times.size == 1:
