@@ -1,5 +1,8 @@
 import nibabel as nib
 import numpy as np
+from device_manager import get_xp, device_manager
+
+xp = get_xp()
 
 def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     """
@@ -187,6 +190,9 @@ class Phantom:
     def __init__(self,rho:np.ndarray,t1:np.ndarray,t2:np.ndarray,fov_x:float=1.0,
                 slice_thickness:float=1.0,fov_y:float=1.0,SpinNum=1,TypeNum=1,
                 RxCoilNum=1,TxCoilNum=1):
+        """
+        体模类，支持CuPy GPU加速。
+        """
 
         self.fov_x = fov_x
         self.fov_y = fov_y
@@ -199,9 +205,10 @@ class Phantom:
         if len(t2.shape) == 3:
             t2 = t2[np.newaxis,np.newaxis,:,:,:]
 
-        self.rho = rho
-        self.t1 = t1
-        self.t2 = t2
+        # 将数据移动到当前设备（CPU/GPU）
+        self.rho = device_manager.to_device(rho)
+        self.t1 = device_manager.to_device(t1)
+        self.t2 = device_manager.to_device(t2)
 
         self.Nz = rho.shape[2]
         self.Nx = rho.shape[3]
@@ -210,11 +217,11 @@ class Phantom:
         self.dx = self.fov_x / self.Nx
         self.dy = self.fov_y / self.Ny
 
-        z_axis = (np.arange(self.Nz) - self.Nz / 2 + 0.5) * self.slice_thickness
-        x_axis = (np.arange(self.Nx) - self.Nx / 2 + 0.5) * self.dx
-        y_axis = (np.arange(self.Ny) - self.Ny / 2 + 0.5) * self.dy
+        z_axis = (xp.arange(self.Nz) - self.Nz / 2 + 0.5) * self.slice_thickness
+        x_axis = (xp.arange(self.Nx) - self.Nx / 2 + 0.5) * self.dx
+        y_axis = (xp.arange(self.Ny) - self.Ny / 2 + 0.5) * self.dy
 
-        self.z, self.x, self.y = np.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
+        self.z, self.x, self.y = xp.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
 
         self.SpinNum = SpinNum     # 自旋数
         self.TypeNum = TypeNum     # 类型数
@@ -222,20 +229,20 @@ class Phantom:
         self.TxCoilNum = TxCoilNum     # 发射线圈数
 
         # 高级环境属性默认值
-        self.txCoilmg = np.ones((TxCoilNum,self.Nz,self.Nx,self.Ny))    # 发射场敏感度
-        self.txCoilpe = np.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny))    # 发射场敏感度
-        self.rxCoilmg = np.ones((RxCoilNum,self.Nz,self.Nx,self.Ny))    # 接收场敏感度
-        self.rxCoilpe = np.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny))    # 接收场敏感度
+        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
+        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
+        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
+        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
         
         # 随时间演化的状态 (初始化平衡态)
-        self.Mx = np.zeros_like(self.rho)       
-        self.My = np.zeros_like(self.rho)
-        self.Mz = np.copy(self.rho)
+        self.Mx = device_manager.to_device(xp.zeros_like(self.rho))       
+        self.My = device_manager.to_device(xp.zeros_like(self.rho))
+        self.Mz = device_manager.to_device(xp.copy(self.rho))
 
         self.Gyro = 42.576e6    # gyromagnetic ratio
-        self.CS = np.zeros_like(self.rho)      # chemical shift array
-        self.dB0 = np.zeros_like(self.rho)     # B0 inhomogeneity
-        self.dWRnd = np.zeros_like(self.rho)     # random off-resonance for T2*
+        self.CS = device_manager.to_device(xp.zeros_like(self.rho))      # chemical shift array
+        self.dB0 = device_manager.to_device(xp.zeros_like(self.rho))     # B0 inhomogeneity
+        self.dWRnd = device_manager.to_device(xp.zeros_like(self.rho))     # random off-resonance for T2*
 
 if __name__ == '__main__':
     pass

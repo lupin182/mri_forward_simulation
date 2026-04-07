@@ -34,8 +34,8 @@ def main() -> None:
     dx = pydicom.dcmread('E:\毕业课题/20260317\spinecho_test-1_132306/aligned_results\mtp_tra_1x0.8x2_MTP_PDMap_305_aligned/00000012.dcm').PixelSpacing[0]/1000
     dy = pydicom.dcmread('E:\毕业课题/20260317\spinecho_test-1_132306/aligned_results\mtp_tra_1x0.8x2_MTP_PDMap_305_aligned/00000012.dcm').PixelSpacing[1]/1000
     '''
-    FOV_x =  0.512 # 单位：米
-    FOV_y = 0.512 # 单位：米
+    FOV_x =  0.256#dx*Nx # 单位：米
+    FOV_y =  0.256#dy*Ny # 单位：米
 
     phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=0.004)
     # The current forward model uses one isochromat per voxel, so RF spoiling
@@ -66,4 +66,6 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    # 设备管理器会自动检测CuPy可用性
+
     main()
