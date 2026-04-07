@@ -3,64 +3,17 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pydicom
-
 from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom, load_simple_phantom
-from recon import reconstruct_image_fft, reconstruct_image, reconstruct_image_multi, reconstruct_image_3d
+from recon import reconstruct_image_fft, reconstruct_image, reconstruct_image_multi, reconstruct_image_3d, plot_color_overlay
 from Sequence.write_gre_label import write_gre_label_sequence
 from Sequence.write_epi import write_epi_sequence
 from Sequence.write_se import write_se_sequence
-from Sequence.write_epi_se_rs import write_epi_se_rs_sequence
+from Sequence.write_epi_se import write_epi_se_sequence
 from Sequence.write_epi_label import write_epi_label_sequence
 from Sequence.write_gre import write_gre_sequence
 from simulate import SimulationConfig, simulate
-
 import numpy as np
 import matplotlib.pyplot as plt
-
-def plot_color_overlay(img1, img2, title="Color Overlay"):
-    """
-    生成两张图像的伪彩叠加图 (Color Overlay)
-    红色 = 仅存在于图 1 的信号
-    绿色 = 仅存在于图 2 的信号
-    黄色 = 完美重合
-    """
-    print("正在生成伪彩叠加图...")
-    
-    # 1. 强制取模（防范 MRI 重建出的复数矩阵）
-    img1_mag = np.abs(img1)
-    img2_mag = np.abs(img2)
-    
-    # 2. 形状对齐检查
-    if img1_mag.shape != img2_mag.shape:
-        raise ValueError(f"图像尺寸不匹配！图 1 为 {img1_mag.shape}，图 2 为 {img2_mag.shape}。\n"
-                         f"请确保它们的分辨率和 FOV 已经对齐。")
-                         
-    # 3. 归一化到 [0, 1] 区间
-    # 极其重要！必须归一化，否则因为信号强度的绝对数值不同，根本调和不出黄色
-    img1_norm = (img1_mag - np.min(img1_mag)) / (np.max(img1_mag) - np.min(img1_mag) + 1e-8)
-    img2_norm = (img2_mag - np.min(img2_mag)) / (np.max(img2_mag) - np.min(img2_mag) + 1e-8)
-    
-    # 4. 组装 RGB 三通道矩阵
-    # 形状为 (Ny, Nx, 3)
-    rgb_composite = np.zeros((*img1_norm.shape, 3))
-    
-    # 图 1 塞进红色通道 (R)
-    rgb_composite[..., 0] = img1_norm  
-    # 图 2 塞进绿色通道 (G)
-    rgb_composite[..., 1] = img2_norm  
-    # 蓝色通道 (B) 保持为 0
-    
-    # 5. 绘图展示
-    plt.figure(figsize=(7, 7))
-    plt.imshow(rgb_composite)
-    
-    # 添加图例说明
-    plt.title(f"{title}\n(Red = Img 1, Green = Img 2, Yellow = Match)")
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-    
-    return rgb_composite
 
 
 def main() -> None:
@@ -91,18 +44,9 @@ def main() -> None:
                             fov=(phantom.fov_x, phantom.fov_y), n_slices=phantom.Nz, 
                             tr=100e-3,te=20e-3)
 
-    #seq = write_epi_sequence(n_y=phantom.Ny, n_x=phantom.Nx,
-     #                       fov=(phantom.fov_x, phantom.fov_y), 
-      #                      n_slices=1)
-
-    k_traj_adc,_,_,_,_ = seq.calculate_kspace()
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
-
-    #image_recon, _ = reconstruct_image_fft(k_space_signal, Ny=64, Nx=64)
-    #image_recon = reconstruct_image_multi(k_space_signal, k_traj_adc, 
-    #                                        n_slices=phantom.Nz, Nx=phantom.Nx, Ny=phantom.Ny)
     image_recon, _ = reconstruct_image_fft(k_space_signal, Ny=phantom.Ny, Nx=phantom.Nx)
-    #ans = plot_color_overlay(np.abs(image_recon_2[0]),rho[0, 0, 0])
+
     plt.figure(figsize=(10, 10))
     plt.subplot(121)
     plt.title("Reconstruction")

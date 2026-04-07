@@ -191,3 +191,49 @@ def reconstruct_image_3d(k_space_signal, k_traj_adc, fov_x=220e-3, fov_y=220e-3,
     
     print("3D 重建完成！")
     return image_3d
+
+
+def plot_color_overlay(img1, img2, title="Color Overlay"):
+    """
+    生成两张图像的伪彩叠加图 (Color Overlay)
+    红色 = 仅存在于图 1 的信号
+    绿色 = 仅存在于图 2 的信号
+    黄色 = 完美重合
+    """
+    print("正在生成伪彩叠加图...")
+    
+    # 1. 强制取模（防范 MRI 重建出的复数矩阵）
+    img1_mag = np.abs(img1)
+    img2_mag = np.abs(img2)
+    
+    # 2. 形状对齐检查
+    if img1_mag.shape != img2_mag.shape:
+        raise ValueError(f"图像尺寸不匹配！图 1 为 {img1_mag.shape}，图 2 为 {img2_mag.shape}。\n"
+                         f"请确保它们的分辨率和 FOV 已经对齐。")
+                         
+    # 3. 归一化到 [0, 1] 区间
+    # 极其重要！必须归一化，否则因为信号强度的绝对数值不同，根本调和不出黄色
+    img1_norm = (img1_mag - np.min(img1_mag)) / (np.max(img1_mag) - np.min(img1_mag) + 1e-8)
+    img2_norm = (img2_mag - np.min(img2_mag)) / (np.max(img2_mag) - np.min(img2_mag) + 1e-8)
+    
+    # 4. 组装 RGB 三通道矩阵
+    # 形状为 (Ny, Nx, 3)
+    rgb_composite = np.zeros((*img1_norm.shape, 3))
+    
+    # 图 1 塞进红色通道 (R)
+    rgb_composite[..., 0] = img1_norm  
+    # 图 2 塞进绿色通道 (G)
+    rgb_composite[..., 1] = img2_norm  
+    # 蓝色通道 (B) 保持为 0
+    
+    # 5. 绘图展示
+    plt.figure(figsize=(7, 7))
+    plt.imshow(rgb_composite)
+    
+    # 添加图例说明
+    plt.title(f"{title}\n(Red = Img 1, Green = Img 2, Yellow = Match)")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+    
+    return rgb_composite

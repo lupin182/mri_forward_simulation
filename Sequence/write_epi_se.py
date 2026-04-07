@@ -10,7 +10,7 @@ def write_epi_se_sequence(
     n_x: int = 64,
     n_y: int = 64,
     slice_thickness: float = 3e-3,
-    te: float = 60e-3,
+    te: float = 200e-3,
 ):
     """Create a spin-echo EPI sequence.
 
