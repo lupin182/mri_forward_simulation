@@ -200,12 +200,7 @@ def _readout_signal(
     mxy = phantom.Mx + 1j * phantom.My
     rx_weight = phantom.rxCoilmg * xp.exp(-1j * phantom.rxCoilpe)
     coil_signal = xp.sum(rx_weight * mxy[None, :], axis=1)
-    # 转换为NumPy以进行最终求和（处理结果较小）
-    if device_manager.use_cupy:
-        coil_signal = device_manager.to_numpy(coil_signal)
-        signal = complex(np.sum(coil_signal))
-    else:
-        signal = complex(xp.sum(coil_signal))
+    signal = complex(xp.sum(coil_signal))
 
     if not demodulate_adc or adc is None:
         return signal

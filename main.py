@@ -67,5 +67,15 @@ def main() -> None:
 
 if __name__ == '__main__':
     # 设备管理器会自动检测CuPy可用性
+    import cupy as cp
 
+    # 1. 获取当前正在使用的显卡 ID (默认通常是 0)
+    current_device_id = cp.cuda.Device().id
+    print(f"当前使用的显卡 ID: {current_device_id}")
+
+    # 2. 获取当前显卡的详细名称
+    # 注意：返回的 name 是 bytes 类型，需要解码为字符串
+    props = cp.cuda.runtime.getDeviceProperties(current_device_id)
+    device_name = props['name'].decode('utf-8')
+    print(f"当前使用的显卡名称: {device_name}")
     main()

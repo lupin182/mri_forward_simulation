@@ -52,6 +52,10 @@ def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     t1[mask_marker]  = 0.5 
     t2[mask_marker]  = 0.05
 
+    rho[0,10:15,50:55] = 2.0
+    t1[0,10:15,50:55] = 0.5
+    t2[0,10:15,50:55] = 0.05
+
     rho = rho[np.newaxis,np.newaxis,:,:,:]
     t1 = t1[np.newaxis,np.newaxis,:,:,:]
     t2 = t2[np.newaxis,np.newaxis,:,:,:]
