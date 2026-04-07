@@ -47,9 +47,9 @@ def write_epi_sequence(
 
     # Set system limits
     system = pp.Opts(
-        max_grad=320,
+        max_grad=120,
         grad_unit='mT/m',
-        max_slew=130,
+        max_slew=200, #130,
         slew_unit='T/m/s',
         rf_ringdown_time=30e-6,
         rf_dead_time=100e-6,
@@ -135,7 +135,8 @@ def write_epi_sequence(
 
 
 if __name__ == '__main__':
-    seq = write_epi_sequence(n_slices=3)
+    seq = write_epi_sequence(n_slices=2,plot=True)
+    '''
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
     block = seq.get_block(1)
     print(block)
@@ -143,6 +144,6 @@ if __name__ == '__main__':
         if seq.get_block(i).adc:
             print(seq.get_block(i))
             break
-
+    '''
 
 

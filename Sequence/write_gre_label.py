@@ -12,7 +12,7 @@ def write_gre_label_sequence(
     fov: float | tuple[float, float] = 220e-3,
     n_x: int = 64,
     n_y: int | None = 64,
-    flip_angle_deg: float = 10.0,
+    flip_angle_deg: float = 30.0,
     slice_thickness: float = 3e-3,
     n_slices: int = 1,
     te: float = 4.3e-3,
@@ -20,7 +20,7 @@ def write_gre_label_sequence(
     readout_duration: float = 3.2e-3,
     rf_spoiling_inc_deg: float = 117.0,
     dummy_scans: int = 0,
-    ideal_spoiling_reset: bool = False,
+    ideal_spoiling_reset: bool = True,
 ):
     """Create a GRE sequence with labels for data header control.
 
@@ -69,9 +69,9 @@ def write_gre_label_sequence(
 
     # Set system limits
     system = pp.Opts(
-        max_grad=28,
+        max_grad=120,
         grad_unit='mT/m',
-        max_slew=150,
+        max_slew=200,
         slew_unit='T/m/s',
         rf_ringdown_time=20e-6,
         rf_dead_time=100e-6,

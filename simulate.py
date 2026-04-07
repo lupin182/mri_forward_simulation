@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
-
+from tqdm import tqdm
 import numpy as np
 import pypulseq as pp
-
 from bloch_kernel import TWO_PI, apply_bloch_step, build_off_resonance_rad_s
 from phantom.make_phantom import Phantom
 from utils import (
@@ -322,7 +321,7 @@ def simulate(
     collected_signal: list[complex] = []
     previous_excitation_freq_hz: float | None = None
 
-    for summary in summaries:
+    for summary in tqdm(summaries):
         block = sequence.get_block(summary.index)
         _maybe_reset_transverse_for_ideal_spoiling(
             phantom_state,

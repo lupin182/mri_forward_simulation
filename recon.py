@@ -68,7 +68,7 @@ def reconstruct_image_fft(k_space_signal, Ny, Nx):
     
     # 3. 将 1D 信号折叠成 2D 的 K 空间矩阵
     # 根据扫描习惯，通常外层循环是相位编码(Ny)，内层是读出(Nx)
-    k_space_2d = k_signal_array.reshape((Ny, Nx))
+    k_space_2d = k_signal_array.reshape((Ny, Nx)).T
     
     # ==========================================
     # 核心数学变换：标准 MRI IFFT 流程
@@ -83,7 +83,7 @@ def reconstruct_image_fft(k_space_signal, Ny, Nx):
     
     # 第三步：fftshift - 把重建出的图像空间中心平移回矩阵的正中央
     # （否则图像会被撕裂成四块分布在四个角）
-    image = np.fft.fftshift(img_complex)
+    image = np.fliplr(np.fft.fftshift(img_complex))
     
     print("重建完成！")
     return image, k_space_2d
@@ -112,7 +112,7 @@ def reconstruct_image_multi(
     # 数据格式标准化
     k_space_signal = np.asarray(k_space_signal, dtype=np.complex128)
     k_traj_adc = np.asarray(k_traj_adc)
-    total_samples = n_slices * n_samples_per_slice
+    total_samples = k_traj_adc.shape[1]#n_slices * n_samples_per_slice
 
     # 输入校验
     assert k_space_signal.shape[0] == total_samples, "信号总采样数不匹配！"
