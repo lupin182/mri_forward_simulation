@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pydicom
 from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom, load_simple_phantom
-from recon import reconstruct_3d_cartesian_fft
+from recon import reconstruct_3d_cartesian_fft, plot_color_overlay
 from Sequence.write_gre_label import write_gre_label_sequence
 from Sequence.write_epi import write_epi_sequence
 from Sequence.write_se import write_se_sequence
@@ -48,6 +48,7 @@ def main() -> None:
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
     image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
+    plot_color_overlay(image_recon[0], rho[0,0,0])
     
     plt.figure(figsize=(10, 10))
     plt.subplot(121)
