@@ -14,7 +14,7 @@ from Sequence.write_gre import write_gre_sequence
 from simulate import SimulationConfig, simulate
 import numpy as np
 import matplotlib.pyplot as plt
-
+from generate_artifact import generate_rf_artifact
 
 def main() -> None:
     rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64)
@@ -46,6 +46,9 @@ def main() -> None:
     #seq = write_epi_se_sequence(n_y=phantom.Ny, n_x=phantom.Nx,
     #                        fov=(phantom.fov_x, phantom.fov_y), te=200e-3)
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
+    _, _, _, t_adc, _ = seq.waveforms_and_times()
+    k_space_signal = generate_rf_artifact(t_adc, k_space_signal, rf_noise_freq=[127.7e6], rf_noise_amp=[1.0], bg_noise_amp=0.0)
+    
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
     image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
     plot_color_overlay(image_recon[0], rho[0,0,0])

@@ -189,9 +189,14 @@ def write_gre_label_sequence(
 if __name__ == '__main__':
     seq = write_gre_label_sequence(n_slices=3)
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
-    block = seq.get_block(2)
-    print(block)
-    for i in range(1,len(seq.block_durations)):
+    _,_,_,t_adc, fp_adc = seq.waveforms_and_times()
+    print(t_adc.shape)
+    #block = seq.get_block(2)
+    #print(block)
+    '''
+    for i in range(1,len(seq.block_durations)+1):
         if seq.get_block(i).adc:
-            print(seq.get_block(i))
-            break
+            #print(seq.get_block(i))
+            print(seq.get_block(i).adc)
+    '''
+
