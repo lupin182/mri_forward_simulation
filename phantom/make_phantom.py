@@ -1,5 +1,8 @@
 import nibabel as nib
 import numpy as np
+from device_manager import get_xp, device_manager
+
+xp = get_xp()
 
 def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     """
@@ -48,6 +51,10 @@ def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     rho[mask_marker] = 2.0 
     t1[mask_marker]  = 0.5 
     t2[mask_marker]  = 0.05
+
+    rho[0,10:15,50:55] = 2.0
+    t1[0,10:15,50:55] = 0.5
+    t2[0,10:15,50:55] = 0.05
 
     rho = rho[np.newaxis,np.newaxis,:,:,:]
     t1 = t1[np.newaxis,np.newaxis,:,:,:]
@@ -187,6 +194,9 @@ class Phantom:
     def __init__(self,rho:np.ndarray,t1:np.ndarray,t2:np.ndarray,fov_x:float=1.0,
                 slice_thickness:float=1.0,fov_y:float=1.0,SpinNum=1,TypeNum=1,
                 RxCoilNum=1,TxCoilNum=1):
+        """
+        体模类，支持CuPy GPU加速。
+        """
 
         self.fov_x = fov_x
         self.fov_y = fov_y
@@ -199,9 +209,10 @@ class Phantom:
         if len(t2.shape) == 3:
             t2 = t2[np.newaxis,np.newaxis,:,:,:]
 
-        self.rho = rho
-        self.t1 = t1
-        self.t2 = t2
+        # 将数据移动到当前设备（CPU/GPU）
+        self.rho = device_manager.to_device(rho)
+        self.t1 = device_manager.to_device(t1)
+        self.t2 = device_manager.to_device(t2)
 
         self.Nz = rho.shape[2]
         self.Nx = rho.shape[3]
@@ -210,11 +221,11 @@ class Phantom:
         self.dx = self.fov_x / self.Nx
         self.dy = self.fov_y / self.Ny
 
-        z_axis = (np.arange(self.Nz) - self.Nz / 2 + 0.5) * self.slice_thickness
-        x_axis = (np.arange(self.Nx) - self.Nx / 2 + 0.5) * self.dx
-        y_axis = (np.arange(self.Ny) - self.Ny / 2 + 0.5) * self.dy
+        z_axis = (xp.arange(self.Nz) - self.Nz / 2 + 0.5) * self.slice_thickness
+        x_axis = (xp.arange(self.Nx) - self.Nx / 2 + 0.5) * self.dx
+        y_axis = (xp.arange(self.Ny) - self.Ny / 2 + 0.5) * self.dy
 
-        self.z, self.x, self.y = np.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
+        self.z, self.x, self.y = xp.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
 
         self.SpinNum = SpinNum     # 自旋数
         self.TypeNum = TypeNum     # 类型数
@@ -222,20 +233,78 @@ class Phantom:
         self.TxCoilNum = TxCoilNum     # 发射线圈数
 
         # 高级环境属性默认值
-        self.txCoilmg = np.ones((TxCoilNum,self.Nz,self.Nx,self.Ny))    # 发射场敏感度
-        self.txCoilpe = np.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny))    # 发射场敏感度
-        self.rxCoilmg = np.ones((RxCoilNum,self.Nz,self.Nx,self.Ny))    # 接收场敏感度
-        self.rxCoilpe = np.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny))    # 接收场敏感度
+        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
+        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
+        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
+        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
         
         # 随时间演化的状态 (初始化平衡态)
-        self.Mx = np.zeros_like(self.rho)       
-        self.My = np.zeros_like(self.rho)
-        self.Mz = np.copy(self.rho)
+        self.Mx = device_manager.to_device(xp.zeros_like(self.rho))       
+        self.My = device_manager.to_device(xp.zeros_like(self.rho))
+        self.Mz = device_manager.to_device(xp.copy(self.rho))
 
         self.Gyro = 42.576e6    # gyromagnetic ratio
-        self.CS = np.zeros_like(self.rho)      # chemical shift array
-        self.dB0 = np.zeros_like(self.rho)     # B0 inhomogeneity
-        self.dWRnd = np.zeros_like(self.rho)     # random off-resonance for T2*
+        self.CS = device_manager.to_device(xp.zeros_like(self.rho))      # chemical shift array
+        self.dB0 = device_manager.to_device(xp.zeros_like(self.rho))     # B0 inhomogeneity
+        self.dWRnd = device_manager.to_device(xp.zeros_like(self.rho))     # random off-resonance for T2*
+
+
+    def generate_B0_inhomogeneity(self, mode: str, delta_B0_ppm: float, axis: str = 'x'):
+        """
+        生成3T主磁场不均匀性场图，输出单位：特斯拉（T）
+        支持线性分布 / 抛物线分布两种建模方式
+        
+        参数
+        ----------
+        mode : str
+            分布模式：'linear'（线性）/ 'parabolic'（抛物线/碗状）
+        delta_B0_ppm : float
+            主磁场不均匀度（ppm），例：0.5 → 0.5ppm
+        axis : str
+            线性模式的分布轴：'x' / 'y'，仅线性模式生效
+        
+        返回
+        ----------
+        B0_map : np.ndarray
+            主磁场不均匀场，形状 (Nz, Nx, Ny)，单位：特斯拉（T）
+        """
+        # 主磁场强度 3T
+        B0_nominal = 3.0  
+        # ppm → 特斯拉 核心换算（1 ppm = 1e-6）
+        ppm_to_T = B0_nominal * (delta_B0_ppm / 1e6)
+
+        # ===================== 线性分布（沿X/Y轴）=====================
+        if mode == "linear":
+            if axis not in ["x", "y"]:
+                raise ValueError("线性模式仅支持 x / y 轴")
+            
+            # 选取对应轴的中心化坐标
+            coord = self.x if axis == "x" else self.y
+            # 计算FOV总长度，归一化到 [-0.5, 0.5]
+            fov_length = self.dx * self.Nx if axis == "x" else self.dy * self.Ny
+            normalized_coord = coord / fov_length  
+            # 输出：特斯拉（T）
+            B0_map = ppm_to_T * normalized_coord
+
+        # ===================== 抛物线分布（碗状，X-Y平面）=====================
+        elif mode == "parabolic":
+            # 到中心的径向距离平方（x²+y²）
+            r_square = self.x ** 2 + self.y ** 2
+            # 归一化分母（FOV对角最大值）
+            half_fov_x = (self.Nx / 2) * self.dx
+            half_fov_y = (self.Ny / 2) * self.dy
+            norm_denominator = half_fov_x ** 2 + half_fov_y ** 2
+
+            # 输出：特斯拉（T）
+            B0_map = ppm_to_T * (r_square / norm_denominator)
+
+        else:
+            raise ValueError("模式仅支持 linear / parabolic")
+
+        # 保存到类属性并返回
+        self.dB0 = B0_map
+        return B0_map
+
 
 if __name__ == '__main__':
     pass

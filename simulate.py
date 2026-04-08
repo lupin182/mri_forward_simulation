@@ -7,6 +7,7 @@ import numpy as np
 import pypulseq as pp
 from bloch_kernel import TWO_PI, apply_bloch_step, build_off_resonance_rad_s
 from phantom.make_phantom import Phantom
+from device_manager import get_xp
 from utils import (
     build_time_grid,
     get_adc_sample_times,
@@ -16,6 +17,8 @@ from utils import (
     preprocess_phantom,
     sample_rf_signal,
 )
+
+xp = get_xp()
 
 BlockSolvePath = Literal["fine", "fast"]
 
@@ -68,7 +71,8 @@ def analyze_sequence_blocks(sequence: pp.Sequence) -> list[BlockSummary]:
     return summaries
 
 
-def _build_static_off_resonance(phantom: Phantom, gamma_hz: float) -> np.ndarray:
+def _build_static_off_resonance(phantom: Phantom, gamma_hz: float) -> xp.ndarray:
+    """构建静态偏共振项，使用CuPy加速当GPU可用时。"""
     return build_off_resonance_rad_s(
         gamma_hz=gamma_hz,
         chemical_shift_hz=phantom.CS,
@@ -80,15 +84,18 @@ def _build_static_off_resonance(phantom: Phantom, gamma_hz: float) -> np.ndarray
     )
 
 
-def _rotate_transverse_state(mx: np.ndarray, my: np.ndarray, phase_rad: float) -> None:
-    """Rotate transverse magnetization in-place around the z-axis."""
+def _rotate_transverse_state(mx: xp.ndarray, my: xp.ndarray, phase_rad: float) -> None:
+    """Rotate transverse magnetization in-place around the z-axis.
+    
+    使用CuPy加速此计算，当GPU可用时。
+    """
     # NEW: Used to enter and leave the RF-carrier rotating frame during RF support.
     if abs(phase_rad) <= 1e-15:
         return
 
-    mxy = (mx + 1j * my) * np.exp(1j * phase_rad)
-    mx[:] = np.real(mxy)
-    my[:] = np.imag(mxy)
+    mxy = (mx + 1j * my) * xp.exp(1j * phase_rad)
+    mx[:] = xp.real(mxy)
+    my[:] = xp.imag(mxy)
 
 
 def _is_excitation_block(block) -> bool:
@@ -126,7 +133,10 @@ def _maybe_reset_transverse_for_ideal_spoiling(
 
 
 def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
-    """Exact free precession and relaxation for a block without RF or ADC."""
+    """Exact free precession and relaxation for a block without RF or ADC.
+    
+    使用CuPy加速此计算，当GPU可用时。这是快速路径的核心计算函数。
+    """
     duration = float(block.block_duration)
     if duration <= 0:
         return
@@ -137,12 +147,12 @@ def _apply_fast_block(phantom: Phantom, block, gamma_hz: float) -> None:
     total_phase += TWO_PI * duration * gamma_hz * phantom.dB0
     total_phase += TWO_PI * (gx_area * phantom.x + gy_area * phantom.y + gz_area * phantom.z)
 
-    e2 = np.exp(-duration / np.maximum(phantom.t2, 1e-12))
-    e1 = np.exp(-duration / np.maximum(phantom.t1, 1e-12))
-    mxy = (phantom.Mx + 1j * phantom.My) * e2 * np.exp(-1j * total_phase)
+    e2 = xp.exp(-duration / xp.maximum(phantom.t2, 1e-12))
+    e1 = xp.exp(-duration / xp.maximum(phantom.t1, 1e-12))
+    mxy = (phantom.Mx + 1j * phantom.My) * e2 * xp.exp(-1j * total_phase)
 
-    phantom.Mx[:] = np.real(mxy)
-    phantom.My[:] = np.imag(mxy)
+    phantom.Mx[:] = xp.real(mxy)
+    phantom.My[:] = xp.imag(mxy)
     phantom.Mz[:] = phantom.Mz * e1 + phantom.rho * (1.0 - e1)
 
 
@@ -183,10 +193,14 @@ def _readout_signal(
     *,
     demodulate_adc: bool,
 ) -> complex:
+    """读取信号，使用CuPy加速当GPU可用时。
+    
+    注意：此函数在每次ADC采样时调用，对于大规模问题可能需要优化。
+    """
     mxy = phantom.Mx + 1j * phantom.My
-    rx_weight = phantom.rxCoilmg * np.exp(-1j * phantom.rxCoilpe)
-    coil_signal = np.sum(rx_weight * mxy[None, :], axis=1)
-    signal = complex(np.sum(coil_signal))
+    rx_weight = phantom.rxCoilmg * xp.exp(-1j * phantom.rxCoilpe)
+    coil_signal = xp.sum(rx_weight * mxy[None, :], axis=1)
+    signal = complex(xp.sum(coil_signal))
 
     if not demodulate_adc or adc is None:
         return signal
@@ -204,7 +218,11 @@ def _simulate_fine_block(
     system_b0_t: float,
     config: SimulationConfig,
 ) -> tuple[list[complex], int]:
-    """Numerically integrate a block using a refined time grid."""
+    """Numerically integrate a block using a refined time grid.
+    
+    使用CuPy加速此计算，当GPU可用时。这是最计算密集的函数之一，
+    包含精细时间步长上的Bloch方程求解。
+    """
     time_grid = build_time_grid(block, config.fine_dt)
     adc_sample_times = get_adc_sample_times(getattr(block, "adc", None))
     adc_samples: list[complex] = []
@@ -308,6 +326,9 @@ def simulate(
 
     RF- and ADC-containing blocks use a refined numerical update. All remaining
     blocks use a closed-form free-precession update based on gradient areas.
+    
+    此函数已优化支持CuPy GPU加速，在GPU可用时自动使用GPU计算，
+    无GPU时回退到NumPy CPU计算。输出始终为NumPy数组以保持接口兼容性。
     """
     if config is None:
         config = SimulationConfig()

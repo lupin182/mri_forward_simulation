@@ -34,8 +34,8 @@ def main() -> None:
     dx = pydicom.dcmread('E:\毕业课题/20260317\spinecho_test-1_132306/aligned_results\mtp_tra_1x0.8x2_MTP_PDMap_305_aligned/00000012.dcm').PixelSpacing[0]/1000
     dy = pydicom.dcmread('E:\毕业课题/20260317\spinecho_test-1_132306/aligned_results\mtp_tra_1x0.8x2_MTP_PDMap_305_aligned/00000012.dcm').PixelSpacing[1]/1000
     '''
-    FOV_x =  0.512 # 单位：米
-    FOV_y = 0.512 # 单位：米
+    FOV_x =  0.256#dx*Nx # 单位：米
+    FOV_y =  0.256#dy*Ny # 单位：米
 
     phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=0.004)
     # The current forward model uses one isochromat per voxel, so RF spoiling
@@ -67,4 +67,16 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    # 设备管理器会自动检测CuPy可用性
+    import cupy as cp
+
+    # 1. 获取当前正在使用的显卡 ID (默认通常是 0)
+    current_device_id = cp.cuda.Device().id
+    print(f"当前使用的显卡 ID: {current_device_id}")
+
+    # 2. 获取当前显卡的详细名称
+    # 注意：返回的 name 是 bytes 类型，需要解码为字符串
+    props = cp.cuda.runtime.getDeviceProperties(current_device_id)
+    device_name = props['name'].decode('utf-8')
+    print(f"当前使用的显卡名称: {device_name}")
     main()

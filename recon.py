@@ -108,7 +108,7 @@ def reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Nx, Ny, Nz):
     img_complex = np.fft.ifftn(k_shifted)
     
     # 第三步：中心移回
-    image_3d = np.fft.fftshift(img_complex)
+    image_3d = (np.fft.fftshift(img_complex)).transpose(0, 2, 1)
     
     print("3D 重建完成！")
     return image_3d, k_space_3d

@@ -1,4 +1,7 @@
-"""Utility helpers for the forward MRI simulator."""
+"""Utility helpers for the forward MRI simulator.
+
+此模块已优化支持CuPy GPU加速，在GPU可用时自动使用GPU计算。
+"""
 
 from __future__ import annotations
 
@@ -7,47 +10,71 @@ import copy
 import numpy as np
 
 from phantom.make_phantom import Phantom
+from device_manager import get_xp, device_manager
+
+xp = get_xp()
 
 
 def preprocess_phantom(phantom: Phantom) -> Phantom:
-    """Return a flattened copy of the phantom ready for vectorized simulation."""
+    """Return a flattened copy of the phantom ready for vectorized simulation.
+    
+    使用CuPy加速此预处理步骤，当GPU可用时。
+    """
     if getattr(phantom.rho, "ndim", 0) == 1:
         return phantom
 
     result = copy.copy(phantom)
     shape_target = (result.TypeNum, result.SpinNum, result.Nz, result.Nx, result.Ny)
 
-    result.x = np.broadcast_to(result.x, shape_target)
-    result.y = np.broadcast_to(result.y, shape_target)
-    result.z = np.broadcast_to(result.z, shape_target)
+    # 将数据移动到当前设备（CPU/GPU）
+    result.x = device_manager.to_device(result.x)
+    result.y = device_manager.to_device(result.y)
+    result.z = device_manager.to_device(result.z)
+    result.rho = device_manager.to_device(result.rho)
+    result.t1 = device_manager.to_device(result.t1)
+    result.t2 = device_manager.to_device(result.t2)
+    result.Mz = device_manager.to_device(result.Mz)
+    result.Mx = device_manager.to_device(result.Mx)
+    result.My = device_manager.to_device(result.My)
+    result.CS = device_manager.to_device(result.CS)
+    result.dB0 = device_manager.to_device(result.dB0)
+    result.dWRnd = device_manager.to_device(result.dWRnd)
+    result.txCoilmg = device_manager.to_device(result.txCoilmg)
+    result.txCoilpe = device_manager.to_device(result.txCoilpe)
+    result.rxCoilmg = device_manager.to_device(result.rxCoilmg)
+    result.rxCoilpe = device_manager.to_device(result.rxCoilpe)
 
-    result.rho = np.asarray(result.rho).ravel()
-    result.t1 = np.asarray(result.t1).ravel()
-    result.t2 = np.asarray(result.t2).ravel()
-    result.Mz = np.asarray(result.Mz).ravel()
-    result.Mx = np.asarray(result.Mx).ravel()
-    result.My = np.asarray(result.My).ravel()
-    result.CS = np.asarray(result.CS).ravel()
-    result.dB0 = np.asarray(result.dB0).ravel()
-    result.dWRnd = np.asarray(result.dWRnd).ravel()
+    result.x = xp.broadcast_to(result.x, shape_target)
+    result.y = xp.broadcast_to(result.y, shape_target)
+    result.z = xp.broadcast_to(result.z, shape_target)
 
-    result.x = np.asarray(result.x).ravel()
-    result.y = np.asarray(result.y).ravel()
-    result.z = np.asarray(result.z).ravel()
+    result.rho = xp.asarray(result.rho).ravel()
+    result.t1 = xp.asarray(result.t1).ravel()
+    result.t2 = xp.asarray(result.t2).ravel()
+    result.Mz = xp.asarray(result.Mz).ravel()
+    result.Mx = xp.asarray(result.Mx).ravel()
+    result.My = xp.asarray(result.My).ravel()
+    result.CS = xp.asarray(result.CS).ravel()
+    result.dB0 = xp.asarray(result.dB0).ravel()
+    result.dWRnd = xp.asarray(result.dWRnd).ravel()
 
-    result.txCoilmg = np.broadcast_to(
+    result.x = xp.asarray(result.x).ravel()
+    result.y = xp.asarray(result.y).ravel()
+    result.z = xp.asarray(result.z).ravel()
+
+    result.txCoilmg = xp.broadcast_to(
         result.txCoilmg[:, None, None, :, :, :],
         (result.TxCoilNum, result.TypeNum, result.SpinNum, result.Nz, result.Nx, result.Ny),
     ).reshape(result.TxCoilNum, -1)
-    result.txCoilpe = np.broadcast_to(
+    result.txCoilpe = xp.broadcast_to(
         result.txCoilpe[:, None, None, :, :, :],
         (result.TxCoilNum, result.TypeNum, result.SpinNum, result.Nz, result.Nx, result.Ny),
     ).reshape(result.TxCoilNum, -1)
-    result.rxCoilmg = np.broadcast_to(
+    result.rxCoilmg = xp.broadcast_to(
         result.rxCoilmg[:, None, None, :, :, :],
         (result.RxCoilNum, result.TypeNum, result.SpinNum, result.Nz, result.Nx, result.Ny),
     ).reshape(result.RxCoilNum, -1)
-    result.rxCoilpe = np.broadcast_to(
+    result.rxCoilpe = xp.broadcast_to(
         result.rxCoilpe[:, None, None, :, :, :],
         (result.RxCoilNum, result.TypeNum, result.SpinNum, result.Nz, result.Nx, result.Ny),
     ).reshape(result.RxCoilNum, -1)
