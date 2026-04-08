@@ -248,5 +248,63 @@ class Phantom:
         self.dB0 = device_manager.to_device(xp.zeros_like(self.rho))     # B0 inhomogeneity
         self.dWRnd = device_manager.to_device(xp.zeros_like(self.rho))     # random off-resonance for T2*
 
+
+    def generate_B0_inhomogeneity(self, mode: str, delta_B0_ppm: float, axis: str = 'x'):
+        """
+        生成3T主磁场不均匀性场图，输出单位：特斯拉（T）
+        支持线性分布 / 抛物线分布两种建模方式
+        
+        参数
+        ----------
+        mode : str
+            分布模式：'linear'（线性）/ 'parabolic'（抛物线/碗状）
+        delta_B0_ppm : float
+            主磁场不均匀度（ppm），例：0.5 → 0.5ppm
+        axis : str
+            线性模式的分布轴：'x' / 'y'，仅线性模式生效
+        
+        返回
+        ----------
+        B0_map : np.ndarray
+            主磁场不均匀场，形状 (Nz, Nx, Ny)，单位：特斯拉（T）
+        """
+        # 主磁场强度 3T
+        B0_nominal = 3.0  
+        # ppm → 特斯拉 核心换算（1 ppm = 1e-6）
+        ppm_to_T = B0_nominal * (delta_B0_ppm / 1e6)
+
+        # ===================== 线性分布（沿X/Y轴）=====================
+        if mode == "linear":
+            if axis not in ["x", "y"]:
+                raise ValueError("线性模式仅支持 x / y 轴")
+            
+            # 选取对应轴的中心化坐标
+            coord = self.x if axis == "x" else self.y
+            # 计算FOV总长度，归一化到 [-0.5, 0.5]
+            fov_length = self.dx * self.Nx if axis == "x" else self.dy * self.Ny
+            normalized_coord = coord / fov_length  
+            # 输出：特斯拉（T）
+            B0_map = ppm_to_T * normalized_coord
+
+        # ===================== 抛物线分布（碗状，X-Y平面）=====================
+        elif mode == "parabolic":
+            # 到中心的径向距离平方（x²+y²）
+            r_square = self.x ** 2 + self.y ** 2
+            # 归一化分母（FOV对角最大值）
+            half_fov_x = (self.Nx / 2) * self.dx
+            half_fov_y = (self.Ny / 2) * self.dy
+            norm_denominator = half_fov_x ** 2 + half_fov_y ** 2
+
+            # 输出：特斯拉（T）
+            B0_map = ppm_to_T * (r_square / norm_denominator)
+
+        else:
+            raise ValueError("模式仅支持 linear / parabolic")
+
+        # 保存到类属性并返回
+        self.dB0 = B0_map
+        return B0_map
+
+
 if __name__ == '__main__':
     pass

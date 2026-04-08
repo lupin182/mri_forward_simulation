@@ -7,7 +7,7 @@ import numpy as np
 import pypulseq as pp
 from bloch_kernel import TWO_PI, apply_bloch_step, build_off_resonance_rad_s
 from phantom.make_phantom import Phantom
-from device_manager import get_xp, device_manager
+from device_manager import get_xp
 from utils import (
     build_time_grid,
     get_adc_sample_times,
