@@ -33,7 +33,7 @@ def generate_complex_phantom_and_dB0(Nz=1, Nx=128, Ny=128):
     t2 = np.ones((Nz, Nx, Ny)) * 0.005
     
     # 2. 生成坐标网格
-    z, x, y = np.meshgrid(
+    _, x, y = np.meshgrid(
         np.arange(Nz), 
         np.arange(Nx) - Nx/2,  
         np.arange(Ny) - Ny/2, 
@@ -89,6 +89,8 @@ from Sequence.write_gre_label import write_gre_label_sequence
 from Sequence.write_epi_se import write_epi_se_sequence
 from simulate import SimulationConfig, simulate
 from recon import reconstruct_3d_cartesian_fft, plot_color_overlay
+from generate_artifact import generate_B0_inhomogeneity
+
 
 def run_simulation_with_dB0(rho, t1, t2, FOV_x, FOV_y, slice_thickness, 
                              ideal_spoiling_reset=True, dummy_scans=0, has_dB0=False):
@@ -104,12 +106,10 @@ def run_simulation_with_dB0(rho, t1, t2, FOV_x, FOV_y, slice_thickness,
     返回:
         image_recon: 重建的图像
     """
+    phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=slice_thickness)
+
     if has_dB0:
-        phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=slice_thickness)
-        phantom.generate_B0_inhomogeneity(mode="linear", delta_B0_ppm=dB0_amplitude,axis="y")
-    else:
-        phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=slice_thickness)
-    phantom.dB0 = device_manager.to_device(phantom.dB0)
+        generate_B0_inhomogeneity(phantom, mode="linear", delta_B0_ppm=dB0_amplitude,axis="y")
 
     seq = write_gre_label_sequence(n_y=phantom.Ny, n_x=phantom.Nx,
                                 fov=(phantom.fov_x, phantom.fov_y), n_slices=phantom.Nz, 
@@ -245,51 +245,51 @@ def visualize_results(image_ideal, image_artifact, metrics):
     #print("\n可视化结果已保存为: dB0_artifact_verification.png")
 
 # ==================== 主程序 ====================
+if __name__ == '__main__':
+    # 参数设置
+    Nz = 1
+    Nx = 64
+    Ny = 64
+    FOV_x = 0.256  # 22 cm
+    FOV_y = 0.256  # 22 cm
+    slice_thickness = 5e-3  # 5 mm
+    dB0_amplitude = 20 #单位ppm
 
-# 参数设置
-Nz = 1
-Nx = 64
-Ny = 64
-FOV_x = 0.256  # 22 cm
-FOV_y = 0.256  # 22 cm
-slice_thickness = 5e-3  # 5 mm
-dB0_amplitude = 20 #单位ppm
+    print("="*60)
+    print("开始主磁场不均匀伪影验证")
+    print("="*60)
+    print(f"成像参数: Nx={Nx}, Ny={Ny}, FOV={FOV_x*100}cm×{FOV_y*100}cm")
+    print(f"dB0不均匀幅度: {dB0_amplitude} ppm")
 
-print("="*60)
-print("开始主磁场不均匀伪影验证")
-print("="*60)
-print(f"成像参数: Nx={Nx}, Ny={Ny}, FOV={FOV_x*100}cm×{FOV_y*100}cm")
-print(f"dB0不均匀幅度: {dB0_amplitude} ppm")
+    # 1. 生成体模和dB0数据
+    print("步骤1: 生成复杂体模和dB0主磁场不均匀数据...")
+    rho, t1, t2 = generate_complex_phantom_and_dB0(Nz=Nz, Nx=Nx, Ny=Ny)
+    print("  [OK] 体模和dB0数据生成完成")
 
-# 1. 生成体模和dB0数据
-print("步骤1: 生成复杂体模和dB0主磁场不均匀数据...")
-rho, t1, t2 = generate_complex_phantom_and_dB0(Nz=Nz, Nx=Nx, Ny=Ny)
-print("  [OK] 体模和dB0数据生成完成")
+    # 2. 模拟理想情况 (dB0=0)
+    print("步骤2: 运行理想成像模拟 (dB0=0)...")
+    image_ideal = run_simulation_with_dB0(
+        rho, t1, t2,
+        FOV_x, FOV_y, slice_thickness,
+        ideal_spoiling_reset=True, dummy_scans=0, has_dB0=False
+    )
+    print("  [OK] 理想成像模拟完成")
 
-# 2. 模拟理想情况 (dB0=0)
-print("步骤2: 运行理想成像模拟 (dB0=0)...")
-image_ideal = run_simulation_with_dB0(
-    rho, t1, t2,
-    FOV_x, FOV_y, slice_thickness,
-    ideal_spoiling_reset=True, dummy_scans=0, has_dB0=False
-)
-print("  [OK] 理想成像模拟完成")
+    # 3. 模拟有dB0伪影的情况
+    print("步骤3: 运行含dB0伪影的成像模拟...")
+    image_artifact = run_simulation_with_dB0(
+        rho, t1, t2, 
+        FOV_x, FOV_y, slice_thickness,
+        ideal_spoiling_reset=True, dummy_scans=0, has_dB0=True
+    )
+    print("  [OK] 含伪影成像模拟完成")
 
-# 3. 模拟有dB0伪影的情况
-print("步骤3: 运行含dB0伪影的成像模拟...")
-image_artifact = run_simulation_with_dB0(
-    rho, t1, t2, 
-    FOV_x, FOV_y, slice_thickness,
-    ideal_spoiling_reset=True, dummy_scans=0, has_dB0=True
-)
-print("  [OK] 含伪影成像模拟完成")
+    # 4. 计算质量指标
+    print("步骤4: 计算图像质量对比指标...")
+    metrics = calculate_image_metrics(image_ideal, image_artifact)
+    print("  [OK] 指标计算完成")
 
-# 4. 计算质量指标
-print("步骤4: 计算图像质量对比指标...")
-metrics = calculate_image_metrics(image_ideal, image_artifact)
-print("  [OK] 指标计算完成")
-
-# 5. 可视化结果
-print("步骤5: 生成可视化结果...")
-visualize_results(image_ideal, image_artifact, metrics)
+    # 5. 可视化结果
+    print("步骤5: 生成可视化结果...")
+    visualize_results(image_ideal, image_artifact, metrics)
 
