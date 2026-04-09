@@ -192,16 +192,18 @@ def load_simple_phantom(phantom_path, slice_num:int=None):
 
 class Phantom:
     def __init__(self,rho:np.ndarray,t1:np.ndarray,t2:np.ndarray,fov_x:float=1.0,
-                slice_thickness:float=1.0,fov_y:float=1.0,SpinNum=1,TypeNum=1,
-                RxCoilNum=1,TxCoilNum=1):
+                slice_thickness:float=1.0,fov_y:float=1.0,
+                RxCoilNum=1,TxCoilNum=1,B0:float=3.0,dB0:np.ndarray=None,
+                txCoilmg:np.ndarray=None,rxCoilmg:np.ndarray=None,
+                txCoilpe:np.ndarray=None,rxCoilpe:np.ndarray=None,
+                CS:np.ndarray=None,dWRnd:np.ndarray=None):
         """
         体模类，支持CuPy GPU加速。
         """
-
         self.fov_x = fov_x
         self.fov_y = fov_y
         self.slice_thickness = slice_thickness
-
+        self.B0 = B0
         if len(rho.shape) == 3:
             rho = rho[np.newaxis,np.newaxis,:,:,:]
         if len(t1.shape) == 3:
@@ -227,83 +229,43 @@ class Phantom:
 
         self.z, self.x, self.y = xp.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
 
-        self.SpinNum = SpinNum     # 自旋数
-        self.TypeNum = TypeNum     # 类型数
+        assert self.rho.shape == self.t1.shape, "rho shape must be t1 shape"
+        assert self.rho.shape == self.t2.shape, "rho shape must be t2 shape"
+        assert len(self.rho.shape) == 5, "input rho shape must be (TypeNum, SpinNum, Nz, Nx, Ny) or (Nz, Nx, Ny)"
+
+        self.SpinNum = self.rho.shape[1]     # 自旋数
+        self.TypeNum = self.rho.shape[0]     # 类型数
         self.RxCoilNum = RxCoilNum     # 接收线圈数
         self.TxCoilNum = TxCoilNum     # 发射线圈数
 
+
         # 高级环境属性默认值
-        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
-        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny)))    # 发射场敏感度
-        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
-        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny)))    # 接收场敏感度
+        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilmg is None else device_manager.to_device(txCoilmg)    # 发射场敏感度
+        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilpe is None else device_manager.to_device(txCoilpe)    # 发射场敏感度
+        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilmg is None else device_manager.to_device(rxCoilmg)    # 接收场敏感度
+        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilpe is None else device_manager.to_device(rxCoilpe)    # 接收场敏感度
         
+        assert self.txCoilmg.shape == (TxCoilNum, self.Nz, self.Nx, self.Ny), "txCoilmg shape must be (TxCoilNum, self.Nz, self.Nx, self.Ny)"
+        assert self.txCoilpe.shape == (TxCoilNum, self.Nz, self.Nx, self.Ny), "txCoilpe shape must be (TxCoilNum, self.Nz, self.Nx, self.Ny)"
+        assert self.rxCoilmg.shape == (RxCoilNum, self.Nz, self.Nx, self.Ny), "rxCoilmg shape must be (RxCoilNum, self.Nz, self.Nx, self.Ny)"
+        assert self.rxCoilpe.shape == (RxCoilNum, self.Nz, self.Nx, self.Ny), "rxCoilpe shape must be (RxCoilNum, self.Nz, self.Nx, self.Ny)"
+
         # 随时间演化的状态 (初始化平衡态)
         self.Mx = device_manager.to_device(xp.zeros_like(self.rho))       
         self.My = device_manager.to_device(xp.zeros_like(self.rho))
-        self.Mz = device_manager.to_device(xp.copy(self.rho))
+        self.Mz = device_manager.to_device(xp.copy(self.rho * self.B0))
 
         self.Gyro = 42.576e6    # gyromagnetic ratio
-        self.CS = device_manager.to_device(xp.zeros_like(self.rho))      # chemical shift array
-        self.dB0 = device_manager.to_device(xp.zeros_like(self.rho))     # B0 inhomogeneity
-        self.dWRnd = device_manager.to_device(xp.zeros_like(self.rho))     # random off-resonance for T2*
+        # chemical shift array
+        self.CS = device_manager.to_device(xp.zeros_like(self.rho)) if CS is None else device_manager.to_device(CS)
+        # B0 inhomogeneity
+        self.dB0 = device_manager.to_device(xp.zeros_like(self.rho)) if dB0 is None else device_manager.to_device(dB0)
+        # random off-resonance for T2*
+        self.dWRnd = device_manager.to_device(xp.zeros_like(self.rho)) if dWRnd is None else device_manager.to_device(dWRnd)
 
-
-    def generate_B0_inhomogeneity(self, mode: str, delta_B0_ppm: float, axis: str = 'x'):
-        """
-        生成3T主磁场不均匀性场图，输出单位：特斯拉（T）
-        支持线性分布 / 抛物线分布两种建模方式
-        
-        参数
-        ----------
-        mode : str
-            分布模式：'linear'（线性）/ 'parabolic'（抛物线/碗状）
-        delta_B0_ppm : float
-            主磁场不均匀度（ppm），例：0.5 → 0.5ppm
-        axis : str
-            线性模式的分布轴：'x' / 'y'，仅线性模式生效
-        
-        返回
-        ----------
-        B0_map : np.ndarray
-            主磁场不均匀场，形状 (Nz, Nx, Ny)，单位：特斯拉（T）
-        """
-        # 主磁场强度 3T
-        B0_nominal = 3.0  
-        # ppm → 特斯拉 核心换算（1 ppm = 1e-6）
-        ppm_to_T = B0_nominal * (delta_B0_ppm / 1e6)
-
-        # ===================== 线性分布（沿X/Y轴）=====================
-        if mode == "linear":
-            if axis not in ["x", "y"]:
-                raise ValueError("线性模式仅支持 x / y 轴")
-            
-            # 选取对应轴的中心化坐标
-            coord = self.x if axis == "x" else self.y
-            # 计算FOV总长度，归一化到 [-0.5, 0.5]
-            fov_length = self.dx * self.Nx if axis == "x" else self.dy * self.Ny
-            normalized_coord = coord / fov_length  
-            # 输出：特斯拉（T）
-            B0_map = ppm_to_T * normalized_coord
-
-        # ===================== 抛物线分布（碗状，X-Y平面）=====================
-        elif mode == "parabolic":
-            # 到中心的径向距离平方（x²+y²）
-            r_square = self.x ** 2 + self.y ** 2
-            # 归一化分母（FOV对角最大值）
-            half_fov_x = (self.Nx / 2) * self.dx
-            half_fov_y = (self.Ny / 2) * self.dy
-            norm_denominator = half_fov_x ** 2 + half_fov_y ** 2
-
-            # 输出：特斯拉（T）
-            B0_map = ppm_to_T * (r_square / norm_denominator)
-
-        else:
-            raise ValueError("模式仅支持 linear / parabolic")
-
-        # 保存到类属性并返回
-        self.dB0 = B0_map
-        return B0_map
+        assert self.dWRnd.shape == (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny), "dWRnd shape must be (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny)"
+        assert self.CS.shape == (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny), "CS shape must be (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny)"
+        assert self.dB0.shape == (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny), "dB0 shape must be (self.TypeNum, self.SpinNum, self.Nz, self.Nx, self.Ny)"
 
 
 if __name__ == '__main__':
