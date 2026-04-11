@@ -159,3 +159,78 @@ def apply_bloch_step(
     mz[:] = mz * e1 + xp.asarray(rho, dtype=xp.float64) * (1.0 - e1)
     return mx, my, mz
 
+def BlochKernel(
+    Gyro,
+    CS,
+    Rho,
+    T1,
+    T2,
+    Mz,
+    My,
+    Mx,
+    dB0,
+    dWRnd,
+    Gzgrid,
+    Gygrid,
+    Gxgrid,
+    TxCoilmg,
+    TxCoilpe,
+    dt,
+    rfAmp,
+    rfPhase,
+    rfFreq,
+    GzAmp,
+    GyAmp,
+    GxAmp,
+    TxCoilNum,
+):
+    """Backward-compatible wrapper around the new Bloch step implementation.
+
+    ``rfFreq`` is treated as an RF carrier detuning term and is subtracted from
+    the effective spin off-resonance, matching the physical handling used by
+    the block-driven simulator for PyPulseq RF ``freq_offset``.
+    
+    使用CuPy加速此计算，当GPU可用时。
+    """
+    del TxCoilNum
+
+    rf_amp = xp.atleast_1d(xp.asarray(rfAmp, dtype=xp.float64))
+    rf_phase = xp.atleast_1d(xp.asarray(rfPhase, dtype=xp.float64))
+    rf_freq = xp.atleast_1d(xp.asarray(rfFreq, dtype=xp.float64))
+
+    if rf_amp.size == 0:
+        rf_hz = 0.0j
+    else:
+        # MOD: Keep the RF waveform in baseband and represent the carrier in the
+        # MOD: effective off-resonance term below.
+        rf_hz = rf_amp * xp.exp(1j * rf_phase)
+
+    off_resonance = build_off_resonance_rad_s(
+        gamma_hz=float(Gyro),
+        chemical_shift_hz=xp.asarray(CS, dtype=xp.float64),
+        dB0_t=xp.asarray(dB0, dtype=xp.float64),
+        dwrnd_rad_s=xp.asarray(dWRnd, dtype=xp.float64),
+        z_m=xp.asarray(Gzgrid, dtype=xp.float64),
+        y_m=xp.asarray(Gygrid, dtype=xp.float64),
+        x_m=xp.asarray(Gxgrid, dtype=xp.float64),
+        gz_hz_per_m=float(GzAmp),
+        gy_hz_per_m=float(GyAmp),
+        gx_hz_per_m=float(GxAmp),
+    )
+    # NEW: Apply the RF carrier as a detuning shift in the legacy dense-kernel path.
+    rf_carrier_hz = float(rf_freq[0]) if rf_freq.size > 0 else 0.0
+    off_resonance = off_resonance - TWO_PI * rf_carrier_hz
+
+    return apply_bloch_step(
+        rho=xp.asarray(Rho, dtype=xp.float64),
+        t1=xp.asarray(T1, dtype=xp.float64),
+        t2=xp.asarray(T2, dtype=xp.float64),
+        mx=xp.asarray(Mx, dtype=xp.float64),
+        my=xp.asarray(My, dtype=xp.float64),
+        mz=xp.asarray(Mz, dtype=xp.float64),
+        off_resonance_rad_s=off_resonance,
+        dt_s=float(dt),
+        rf_hz=rf_hz,
+        tx_coil_magnitude=xp.asarray(TxCoilmg, dtype=xp.float64),
+        tx_coil_phase=xp.asarray(TxCoilpe, dtype=xp.float64),
+    )
