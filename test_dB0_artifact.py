@@ -248,12 +248,12 @@ def visualize_results(image_ideal, image_artifact, metrics):
 if __name__ == '__main__':
     # 参数设置
     Nz = 1
-    Nx = 64
-    Ny = 64
+    Nx = 256
+    Ny = 256
     FOV_x = 0.256  # 22 cm
     FOV_y = 0.256  # 22 cm
     slice_thickness = 5e-3  # 5 mm
-    dB0_amplitude = 20 #单位ppm
+    dB0_amplitude = 30 #单位ppm
 
     print("="*60)
     print("开始主磁场不均匀伪影验证")
@@ -273,6 +273,7 @@ if __name__ == '__main__':
         FOV_x, FOV_y, slice_thickness,
         ideal_spoiling_reset=True, dummy_scans=0, has_dB0=False
     )
+    np.save("test_picture/image_ideal_db0_50ppm.npy", image_ideal)
     print("  [OK] 理想成像模拟完成")
 
     # 3. 模拟有dB0伪影的情况
@@ -282,6 +283,7 @@ if __name__ == '__main__':
         FOV_x, FOV_y, slice_thickness,
         ideal_spoiling_reset=True, dummy_scans=0, has_dB0=True
     )
+    np.save("test_picture/image_artifact_db0_50ppm.npy", image_artifact)
     print("  [OK] 含伪影成像模拟完成")
 
     # 4. 计算质量指标

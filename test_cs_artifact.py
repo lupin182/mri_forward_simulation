@@ -8,11 +8,6 @@ def create_chemical_shift_phantom(
     B0: float = 3.0   # 3.0T主磁场，化学位移Hz单位
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    ✅ 严格按照MRI仿真维度定义：(TypeNum, SpinNum, Nz, Nx, Ny)
-    ✅ TypeNum=1：每个体素仅1种组织
-    ✅ 化学位移单位：Hz
-    ✅ 体膜空间分布：左脂肪 + 右水（频率编码X轴，完美产生化学位移伪影）
-    
     返回：pdmap, t1map, t2map, csmap  维度均为 (1,1,Nz,Nx,Ny)
     """
     # 强制单组织单自旋体素
@@ -25,7 +20,7 @@ def create_chemical_shift_phantom(
     csmap = np.zeros((TypeNum, SpinNum, Nz, Nx, Ny), dtype=np.float32)
 
     # 旋磁比：H质子 γ/2π = 42.58 MHz/T = 42.58 Hz/(ppm·T)
-    fat_cs_ppm = -3.5 #-3.4
+    fat_cs_ppm = -3.4 #-3.4
     fat_cs_hz = B0 * 42.576 * fat_cs_ppm  # 脂肪化学位移(Hz)
     water_cs_hz = 0.0                    # 水化学位移(Hz)
 
