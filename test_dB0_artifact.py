@@ -167,7 +167,7 @@ def calculate_image_metrics(img1, img2):
     max_diff = np.max(np.abs(img1_norm - img2_norm))
     
     # 计算相对误差
-    relative_error = np.mean(np.abs(img1_norm - img2_norm) / (img1_norm + 1e-8))
+    relative_error = np.mean(np.abs(img2_norm - img1_norm) / (img2_norm + 1e-8))
     
     metrics = {
         'MSE': mse,
