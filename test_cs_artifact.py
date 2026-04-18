@@ -20,7 +20,7 @@ def create_chemical_shift_phantom(
     csmap = np.zeros((TypeNum, SpinNum, Nz, Nx, Ny), dtype=np.float32)
 
     # 旋磁比：H质子 γ/2π = 42.58 MHz/T = 42.58 Hz/(ppm·T)
-    fat_cs_ppm = -3.4 #-3.4
+    fat_cs_ppm = 5 #-3.4
     fat_cs_hz = B0 * 42.576 * fat_cs_ppm  # 脂肪化学位移(Hz)
     water_cs_hz = 0.0                    # 水化学位移(Hz)
 
@@ -47,8 +47,8 @@ if __name__ == '__main__':
     from simulate import simulate, SimulationConfig
     from recon import reconstruct_3d_cartesian_fft
     import matplotlib.pyplot as plt
-    pdmap, t1map, t2map, csmap = create_chemical_shift_phantom(Nx=64, Ny=64)
-    phantom = Phantom(pdmap, t1map, t2map, fov_x=0.512, fov_y=0.512, slice_thickness=5e-3, CS=csmap)
+    pdmap, t1map, t2map, csmap = create_chemical_shift_phantom(Nx=256, Ny=256)
+    phantom = Phantom(pdmap, t1map, t2map, fov_x=0.256, fov_y=0.256, slice_thickness=5e-3, CS=csmap)
     seq = write_gre_label_sequence(n_y=phantom.Ny, n_x=phantom.Nx,
                                 fov=(phantom.fov_x, phantom.fov_y), n_slices=phantom.Nz, 
                                 tr=100e-3, te=20e-3)
@@ -56,6 +56,7 @@ if __name__ == '__main__':
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
     image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
+    np.save("test_picture/image_artifact_cs_5ppm.npy", image_recon)
 
     plt.figure(figsize=(10, 10))
     plt.subplot(1,2,1)
