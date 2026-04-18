@@ -14,6 +14,9 @@ from phantom.make_phantom import (
     Phantom
 )
 import json
+import pickle
+
+phantom_cache = None
 
 class GeneratePhantomTool(MRISimulationBaseTool):
     name: str = "generate_phantom"
@@ -32,6 +35,8 @@ class GeneratePhantomTool(MRISimulationBaseTool):
     """
 
     def _run(self, query: str) -> str:
+        global phantom_cache
+        
         params = json.loads(query)
         phantom_type = params.get('phantom_type', 'asymmetric')
         Nz = params.get('Nz', 1)
@@ -51,9 +56,10 @@ class GeneratePhantomTool(MRISimulationBaseTool):
             radius = params.get('radius', 16)
             rho, t1, t2 = generate_simple_sphere_phantom(Nz=Nz, Nx=Nx, Ny=Ny, radius=radius)
         else:
-            return f"Error: 未知的体模类型 '{phantom_type}'"
+            return json.dumps({"status": "error", "message": f"未知的体模类型 '{phantom_type}'"})
 
         phantom = Phantom(rho, t1, t2, fov_x=fov_x, fov_y=fov_y, slice_thickness=slice_thickness)
+        set_cached_phantom(phantom, rho, t1, t2)
         
         result = {
             "status": "success",
@@ -63,5 +69,17 @@ class GeneratePhantomTool(MRISimulationBaseTool):
             "slice_thickness": slice_thickness
         }
         
-        return json.dumps(result)
+        return json.dumps(result, ensure_ascii=False)
+
+def get_cached_phantom():
+    global phantom_cache
+    return phantom_cache
+
+def set_cached_phantom(phantom, rho, t1, t2):
+    global phantom_cache
+    phantom_cache = (phantom, rho, t1, t2)
+
+def clear_phantom_cache():
+    global phantom_cache
+    phantom_cache = None
 
