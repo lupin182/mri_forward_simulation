@@ -1,0 +1,7 @@
+======PyPulseq to MRiLab Export======
+Profile : gre_label
+Waveform mode : rfUser/GxUser/GyUser/GzUser/ADCUser
+Notes:
+- This bundle replays the exported PyPulseq waveforms inside MRiLab.
+- Labels, triggers and other non-simulation metadata are not exported.
+- MRiLab still applies its own loop bookkeeping via SimuAttr/SpecialTech.
