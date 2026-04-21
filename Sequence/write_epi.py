@@ -11,7 +11,7 @@ def write_epi_sequence(
     fov: float | tuple[float, float] = 220e-3,
     n_x: int = 64,
     n_y: int = 64,
-    slice_thickness: float = 1e-3,
+    slice_thickness: float = 3e-3,
     n_slices: int = 1,
 ):
     """Create a basic EPI sequence without ramp-sampling.
@@ -47,13 +47,12 @@ def write_epi_sequence(
 
     # Set system limits
     system = pp.Opts(
-        max_grad=120,
+        max_grad=32,
         grad_unit='mT/m',
-        max_slew=200, #130,
+        max_slew=130,
         slew_unit='T/m/s',
         rf_ringdown_time=30e-6,
         rf_dead_time=100e-6,
-        B0=3
     )
 
     seq = pp.Sequence(system)
@@ -92,7 +91,7 @@ def write_epi_sequence(
     )
 
     # Pre-phasing gradients
-    pre_time = 1.6e-3 #8e-4
+    pre_time = 8e-4
     gx_pre = pp.make_trapezoid(channel='x', system=system, area=-gx.area / 2, duration=pre_time)
     gz_reph = pp.make_trapezoid(channel='z', system=system, area=-gz.area / 2, duration=pre_time)
     gy_pre = pp.make_trapezoid(channel='y', system=system, area=-n_y / 2 * delta_ky, duration=pre_time)
@@ -135,15 +134,5 @@ def write_epi_sequence(
 
 
 if __name__ == '__main__':
-    seq = write_epi_sequence(n_slices=2,plot=True)
-    '''
-    k_traj_adc, _, _, _, _ = seq.calculate_kspace()
-    block = seq.get_block(1)
-    print(block)
-    for i in range(1,len(seq.block_durations)):
-        if seq.get_block(i).adc:
-            print(seq.get_block(i))
-            break
-    '''
-
+    write_epi_sequence(write_seq=True)
 

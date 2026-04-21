@@ -152,4 +152,4 @@ def write_epi_se_sequence(
 
 
 if __name__ == '__main__':
-    write_epi_se_sequence(plot=True, write_seq=True)
+    write_epi_se_sequence(write_seq=True)

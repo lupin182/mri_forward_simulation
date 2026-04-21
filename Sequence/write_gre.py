@@ -59,9 +59,9 @@ def write_gre_sequence(
 
     # Set system limits
     system = pp.Opts(
-        max_grad=28,
+        max_grad=120,
         grad_unit='mT/m',
-        max_slew=150,
+        max_slew=200,
         slew_unit='T/m/s',
         rf_ringdown_time=20e-6,
         rf_dead_time=100e-6,
@@ -171,4 +171,4 @@ def write_gre_sequence(
 
 
 if __name__ == '__main__':
-    write_gre_sequence(plot=True, write_seq=True, seq_filename="E:\毕业课题\mrisimulation\Sequence\gre.seq")
+    write_gre_sequence(write_seq=True)

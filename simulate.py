@@ -336,7 +336,7 @@ def simulate(
     phantom_state = preprocess_phantom(phantom)
     gamma_hz = float(getattr(sequence.system, "gamma", getattr(phantom_state, "Gyro", 42.576e6)))
     # NEW: PyPulseq ppm offsets are defined relative to the sequence system B0.
-    system_b0_t = float(getattr(sequence.system, "B0", 0.0))
+    system_b0_t = float(getattr(sequence.system, "B0", 3.0))
 
     summaries = analyze_sequence_blocks(sequence)
     collected_signal: list[complex] = []

@@ -13,9 +13,16 @@ from scipy.io import savemat
 
 from utils import get_rf_frequency_offset_hz, get_rf_phase_offset_rad
 
-_SIMU_ATTR_TEMPLATE = Path("MRiLab-1.3") / "PSD" / "3D" / "SimuAttr.xml"
-_DUMMY_PULSE_TEMPLATE = Path("MRiLab-1.3") / "Macro" / "SpecialTech" / "DummyPulse.xml"
-_EPI_TEMPLATE = Path("MRiLab-1.3") / "Macro" / "SpecialTech" / "EPI.xml"
+# Get correct paths relative to this script's location
+_SCRIPT_DIR = Path(__file__).parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+_MRILAB_DIR = _PROJECT_ROOT / "MRiLab-1.3"
+_MACRO_DIR = _MRILAB_DIR / "Macro"
+
+# Templates are not needed - we'll create XML from scratch
+# _SIMU_ATTR_TEMPLATE = None
+_DUMMY_PULSE_TEMPLATE = _MACRO_DIR / "SpecialTech" / "DummyPulse.xml"
+_EPI_TEMPLATE = _MACRO_DIR / "SpecialTech" / "EPI.xml"
 
 
 @dataclass(slots=True)
@@ -371,62 +378,70 @@ def _copy_and_customize_simu_attr(
     max_slew_t_per_m_s: float,
     b0_t: float,
 ) -> Path:
-    tree = ET.parse(_SIMU_ATTR_TEMPLATE)
-    root = tree.getroot()
-    imaging = root.find("Imaging")
-    advanced = root.find("Advanced")
-    hardware = root.find("Hardware")
-    recon = root.find("Recon")
-    if imaging is None or advanced is None or hardware is None or recon is None:
-        raise ValueError("Unexpected SimuAttr.xml structure.")
-
-    _set_attr(
-        imaging,
-        BandWidth=f"{bandwidth_hz:.12g}",
-        FOVFreq=f"{profile.sequence.definitions['FOV'][0]:.12g}" if "FOV" in profile.sequence.definitions else imaging.get("FOVFreq", "0.2"),
-        FOVPhase=f"{profile.sequence.definitions['FOV'][1]:.12g}" if "FOV" in profile.sequence.definitions else imaging.get("FOVPhase", "0.2"),
-        FlipAng=f"{profile.flip_angle_deg:.12g}",
-        FreqDir="$2'A/P','L/R','S/I'",
-        ResFreq=str(int(profile.n_x)),
-        ResPhase=str(int(profile.n_y)),
-        ScanPlane="$1'Axial','Sagittal','Coronal'",
-        SliceNum=str(int(profile.n_slices)),
-        SliceThick=f"{profile.sequence.definitions['FOV'][2] / max(profile.n_slices, 1):.12g}" if "FOV" in profile.sequence.definitions else imaging.get("SliceThick", "3e-3"),
-        TE=f"{te_s:.12g}",
-        TEPerTR="1",
-        TR=f"{tr_s:.12g}",
-    )
-    _set_attr(
-        advanced,
-        MasterTxCoil="1",
-        MultiTransmit="$1'off','on'",
-        NEX="1",
-        NoFreqAlias="$1'off','on'",
-        NoPhaseAlias="$1'off','on'",
-        NoSliceAlias="$1'off','on'",
-        Shim="$1'Auto', 'Manual'",
-        TEAnchor="$2'Start', 'Middle', 'End'",
-    )
-    _set_attr(
-        hardware,
-        B0=f"{b0_t:.12g}",
-        B1Level="1e-6",
-        E1Level="1e-6",
-        MaxGrad=f"{max(0.05, 1.1 * max_grad_t_per_m):.12g}",
-        MaxSlewRate=f"{max(200.0, 1.1 * max_slew_t_per_m_s):.12g}",
-        MinUpdRate=f"{max(1e-8, min_update_rate_s / 2.0):.12g}",
-        Model="PyPulseq Export",
-        NoiseLevel="10",
-        SpinPerVoxel="1",
-    )
-    _set_attr(
-        recon,
-        AutoRecon="$2'off','on'",
-        ExternalEng="",
-        OutputType="$1'MAT','ISMRMRD','Both'",
-        ReconEng="$1'Default','External'",
-        ReconType="$1'Cartesian','NonCart'",
-    )
+    """Create SimuAttr XML from scratch instead of using template."""
+    
+    # Create root element
+    root = ET.Element("MRiLabSeq")
+    
+    # Add imaging parameters
+    imaging = ET.SubElement(root, "Imaging")
+    imaging.set("BandWidth", f"{bandwidth_hz:.12g}")
+    if hasattr(profile.sequence, 'definitions') and "FOV" in profile.sequence.definitions:
+        fov_val = profile.sequence.definitions['FOV']
+        imaging.set("FOVFreq", f"{fov_val[0]:.12g}")
+        imaging.set("FOVPhase", f"{fov_val[1]:.12g}")
+    else:
+        imaging.set("FOVFreq", "0.2")
+        imaging.set("FOVPhase", "0.2")
+    imaging.set("FlipAng", f"{profile.flip_angle_deg:.12g}")
+    imaging.set("FreqDir", "$2'A/P','L/R','S/I'")
+    imaging.set("ResFreq", str(int(profile.n_x)))
+    imaging.set("ResPhase", str(int(profile.n_y)))
+    imaging.set("ScanPlane", "$1'Axial','Sagittal','Coronal'")
+    imaging.set("SliceNum", str(int(profile.n_slices)))
+    if hasattr(profile.sequence, 'definitions') and "FOV" in profile.sequence.definitions:
+        fov_val = profile.sequence.definitions['FOV']
+        slice_thick = fov_val[2] / max(profile.n_slices, 1) if max(profile.n_slices, 1) > 0 else 0.003
+        imaging.set("SliceThick", f"{slice_thick:.12g}")
+    else:
+        imaging.set("SliceThick", "3e-3")
+    imaging.set("TE", f"{te_s:.12g}")
+    imaging.set("TEPerTR", "1")
+    imaging.set("TR", f"{tr_s:.12g}")
+    
+    # Add advanced parameters
+    advanced = ET.SubElement(root, "Advanced")
+    advanced.set("MasterTxCoil", "1")
+    advanced.set("MultiTransmit", "$1'off','on'")
+    advanced.set("NEX", "1")
+    advanced.set("NoFreqAlias", "$1'off','on'")
+    advanced.set("NoPhaseAlias", "$1'off','on'")
+    advanced.set("NoSliceAlias", "$1'off','on'")
+    advanced.set("Shim", "$1'Auto', 'Manual'")
+    advanced.set("TEAnchor", "$2'Start', 'Middle', 'End'")
+    
+    # Add hardware parameters
+    hardware = ET.SubElement(root, "Hardware")
+    hardware.set("B0", f"{b0_t:.12g}")
+    hardware.set("B1Level", "1e-6")
+    hardware.set("E1Level", "1e-6")
+    hardware.set("MaxGrad", f"{max(0.05, 1.1 * max_grad_t_per_m):.12g}")
+    hardware.set("MaxSlewRate", f"{max(200.0, 1.1 * max_slew_t_per_m_s):.12g}")
+    hardware.set("MinUpdRate", f"{max(1e-8, min_update_rate_s / 2.0):.12g}")
+    hardware.set("Model", "PyPulseq Export")
+    hardware.set("NoiseLevel", "10")
+    hardware.set("SpinPerVoxel", "1")
+    
+    # Add recon parameters
+    recon = ET.SubElement(root, "Recon")
+    recon.set("AutoRecon", "$2'off','on'")
+    recon.set("ExternalEng", "")
+    recon.set("OutputType", "$1'MAT','ISMRMRD','Both'")
+    recon.set("ReconEng", "$1'Default','External'")
+    recon.set("ReconType", "$1'Cartesian','NonCart'")
+    
+    # Write to file
+    tree = ET.ElementTree(root)
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
     return output_path
 
