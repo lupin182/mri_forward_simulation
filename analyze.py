@@ -213,6 +213,7 @@ def calculate_mri_image_di(
 def calculate_mri_image_diff(
     npy_file: str,
     mat_file: str,
+    origin: str,
     mat_var_name: str = "image",  # 你的.mat变量名是 image！
     show_plot: bool = True
 ):
@@ -225,6 +226,10 @@ def calculate_mri_image_diff(
     img_custom = np.squeeze(img_custom)
     # 修复：先取绝对值，再转类型 → 消除 ComplexWarning
     img_custom = np.abs(img_custom).astype(np.float64)
+
+    img_origin = np.load(origin)
+    img_origin = np.squeeze(img_origin)
+    img_origin = np.abs(img_origin).astype(np.float64)
 
     # ===================== 2. 【核心】读取 KomaMRI 结构体复数 =====================
     with h5py.File(mat_file, "r") as f:
@@ -250,7 +255,7 @@ def calculate_mri_image_diff(
 
     img1_norm = normalize(img_custom)
     img2_norm = normalize(img_koma)
-
+    img3_norm = normalize(img_origin)
     # ===================== 5. 计算量化指标 =====================
     flat1 = img1_norm.flatten()
     flat2 = img2_norm.flatten()
@@ -276,10 +281,12 @@ def calculate_mri_image_diff(
 
     # ===================== 7. 可视化 =====================
     if show_plot:
-        plt.figure(figsize=(18, 5))
-        plt.subplot(141), plt.imshow(img1_norm, cmap='gray'), plt.title('自定义仿真'), plt.axis('off')
-        plt.subplot(142), plt.imshow(img2_norm, cmap='gray'), plt.title('KomaMRI'), plt.axis('off')
-        plt.subplot(143), plt.imshow(np.abs(img1_norm-img2_norm), cmap='jet'), plt.title('差异热力图'), plt.axis('off')
+        plt.figure(figsize=(18, 5), constrained_layout=True)
+        plt.subplot(131), plt.imshow(img2_norm, cmap='gray'), plt.title('KomaMRI'), plt.axis('off')
+        plt.subplot(132), plt.imshow(img1_norm, cmap='gray'), plt.title('Simulation'), plt.axis('off')
+        plt.subplot(133), plt.imshow(img3_norm, cmap='gray'), plt.title('Simulation'), plt.axis('off')
+        #plt.subplot(133), plt.imshow(np.abs(img1_norm-img2_norm), cmap='jet'), plt.title('Difference Heatmap'), plt.axis('off')
+        #plt.colorbar(label='Difference Value', shrink=0.72)
         plt.show()
 
     return {
@@ -290,8 +297,9 @@ def calculate_mri_image_diff(
 
 # ========== 请修改为你的文件路径 ==========
 if __name__ == "__main__":
-    result = calculate_mri_image_d(
+    result = calculate_mri_image_diff(
         npy_file="image_recon_gre.npy",       # 你的仿真结果路径
         mat_file="koma_gre.mat",    # KomaMRI结果路径
-        mat_var_name="image"               # ⚠️ 必须修改！.mat文件中的变量名
+        mat_var_name="image",
+        origin="image_recon_ideal.npy"               # ⚠️ 必须修改！.mat文件中的变量名
     )

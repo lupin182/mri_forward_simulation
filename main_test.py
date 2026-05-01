@@ -24,13 +24,13 @@ def main() -> None:
     t1=np.moveaxis(t1, source=2, destination=0)
     t2=np.moveaxis(t2, source=2, destination=0)
 
-    FOV_x =  0.098#dx*Nx # 单位：米
-    FOV_y =  0.098#dy*Ny # 单位：米
+    FOV_x =  0.171#dx*Nx # 单位：米
+    FOV_y =  0.204#dy*Ny # 单位：米
 
     phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=0.003)
 
-    x_axis = np.arange(-0.0495, 0.0495, 0.001)
-    y_axis = np.arange(-0.0495, 0.0495, 0.001)
+    x_axis = np.arange(-0.0845, 0.0875, 0.001)
+    y_axis = np.arange(-0.0985, 0.1065, 0.001)
     z_axis = np.array([0.0])
 
     phantom.z, phantom.x, phantom.y = np.meshgrid(z_axis, x_axis, y_axis, indexing='ij')
@@ -44,14 +44,14 @@ def main() -> None:
     phantom.dB0=phantom.dB0[np.newaxis,np.newaxis,:,:,:]
     '''
     seq = pp.Sequence()
-    seq.read("epi_se_pypulseq.seq")
-
+    seq.read("gre_pypulseq.seq")
+    seq=write_gre_sequence(ideal_spoiling_reset=True)
     k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
 
     
     k_traj_adc, _, _, _, _ = seq.calculate_kspace()
     image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=64, Nx=64, Nz=1)
-    np.save('image_recon.npy', image_recon)
+    np.save('image_recon_ideal.npy', image_recon)
     
     plt.figure(figsize=(10, 10))
     plt.title("Reconstruction")

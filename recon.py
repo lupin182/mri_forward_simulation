@@ -64,7 +64,7 @@ def reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Nx, Ny, Nz):
     print("开始基于坐标映射的 3D 笛卡尔 FFT 重建...")
     
     k_signal = np.asarray(k_space_signal, dtype=np.complex64)
-    
+    k_signal = k_signal.squeeze()
     # ==========================================
     # 1. 坐标归一化：将物理的连续坐标转化为离散的矩阵索引
     # ==========================================
@@ -112,3 +112,92 @@ def reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Nx, Ny, Nz):
     
     print("3D 重建完成！")
     return image_3d, k_space_3d
+
+
+import numpy as np
+
+def reconstruct_3d_cartesian_fft_multichannel(k_space_signal, k_traj_adc, Nx, Ny, Nz):
+    """
+    【多通道兼容版】基于绝对坐标的 3D 笛卡尔 K 空间 FFT 重建
+    
+    参数:
+    - k_space_signal: 复数数组
+      单通道: (N,)
+      多通道: (n_coils, N)  <- 适配你的多通道读出信号
+    - k_traj_adc: shape为 (3, N) 的坐标数组 (物理单位，如 cycles/m)
+    - Nx, Ny, Nz: 目标重建矩阵的三维尺寸
+    
+    返回:
+    - image_3d: 复数图像矩阵
+      单通道: (Nz, Ny, Nx)
+      多通道: (n_coils, Nz, Ny, Nx)
+    - k_space_3d: 重组后标准化的 3D K空间矩阵
+      单通道: (Nz, Ny, Nx)
+      多通道: (n_coils, Nz, Ny, Nx)
+    """
+    print("开始【多通道兼容】基于坐标映射的 3D 笛卡尔 FFT 重建...")
+    
+    # 统一转为numpy数组
+    k_signal = np.asarray(k_space_signal, dtype=np.complex64)
+    
+    # ==========================================
+    # 关键：自动适配单通道/多通道，获取通道数
+    # ==========================================
+    if k_signal.ndim == 1:
+        # 单通道：扩展维度 (N,) → (1, N)
+        n_coils = 1
+        k_signal = k_signal[None, :]
+    else:
+        # 多通道：(n_coils, N)
+        n_coils = k_signal.shape[0]
+
+    # ==========================================
+    # 1. 坐标归一化（完全不变，所有通道共用轨迹）
+    # ==========================================
+    def coords_to_indices(coords, grid_size):
+        """将一维坐标数组映射到 [0, grid_size - 1] 的整数索引区间"""
+        c_min, c_max = np.min(coords), np.max(coords)
+        if c_max == c_min:
+            return np.zeros_like(coords, dtype=int)
+        normalized = (coords - c_min) / (c_max - c_min)
+        indices = np.round(normalized * (grid_size - 1)).astype(int)
+        return np.clip(indices, 0, grid_size - 1)
+
+    # 生成索引（所有通道共用）
+    ix = coords_to_indices(k_traj_adc[0, :], Nx)
+    iy = coords_to_indices(k_traj_adc[1, :], Ny)
+    iz = coords_to_indices(k_traj_adc[2, :], Nz)
+    
+    # ==========================================
+    # 2. 多通道 3D K空间网格填充
+    # ==========================================
+    # 形状：(n_coils, Nz, Ny, Nx)
+    k_space_3d = np.zeros((n_coils, Nz, Ny, Nx), dtype=np.complex64)
+    
+    # 逐通道填充K空间
+    for c in range(n_coils):
+        k_space_3d[c, iz, iy, ix] = k_signal[c]
+    
+    # ==========================================
+    # 3. 多通道 3D-IFFT 重建（完全保留原有算法）
+    # ==========================================
+    k_shifted = np.fft.ifftshift(k_space_3d, axes=(-3, -2, -1))  # 适配多通道，对后三维操作
+    img_complex = np.fft.ifftn(k_shifted, axes=(-3, -2, -1))
+    image_3d = np.fft.fftshift(img_complex, axes=(-3, -2, -1)).transpose(0, 1, 3, 2)  # 多通道维度保持不变
+
+    # 如果原始输入是单通道，压缩回单通道输出
+    if n_coils == 1:
+        image_3d = image_3d[0]
+        k_space_3d = k_space_3d[0]
+
+    print("3D 多通道重建完成！")
+    return image_3d, k_space_3d
+
+
+def sos_reconstruction(coil_images):
+    """
+    多通道MRI图像平方和合并（标准无偏算法）
+    参数：coil_images - 多通道复数图像 (n_coils, Nz, Ny, Nx)
+    返回：final_image - 合并后的模值图像 (Nz, Ny, Nx)
+    """
+    return np.sqrt(np.sum(np.abs(coil_images) ** 2, axis=0))

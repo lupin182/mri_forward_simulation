@@ -15,8 +15,13 @@ from phantom.make_phantom import (
 )
 import json
 import pickle
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
 
 phantom_cache = None
+_phantom_figure_cache = None
 
 class GeneratePhantomTool(MRISimulationBaseTool):
     name: str = "generate_phantom"
@@ -32,10 +37,11 @@ class GeneratePhantomTool(MRISimulationBaseTool):
     - fov_x: x轴视场（米），默认0.256
     - fov_y: y轴视场（米），默认0.256
     - slice_thickness: 切片厚度（米），默认0.004
+    - return_figure: 是否返回matplotlib figure对象用于Streamlit展示，默认True
     """
 
     def _run(self, query: str) -> str:
-        global phantom_cache
+        global phantom_cache, _phantom_figure_cache
         
         params = json.loads(query)
         phantom_type = params.get('phantom_type', 'asymmetric')
@@ -45,6 +51,7 @@ class GeneratePhantomTool(MRISimulationBaseTool):
         fov_x = params.get('fov_x', 0.256)
         fov_y = params.get('fov_y', 0.256)
         slice_thickness = params.get('slice_thickness', 0.004)
+        return_figure = params.get('return_figure', True)
 
         if phantom_type == 'asymmetric':
             rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=Nz, Nx=Nx, Ny=Ny)
@@ -61,6 +68,24 @@ class GeneratePhantomTool(MRISimulationBaseTool):
         phantom = Phantom(rho, t1, t2, fov_x=fov_x, fov_y=fov_y, slice_thickness=slice_thickness)
         set_cached_phantom(phantom, rho, t1, t2)
         
+        if return_figure:
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            
+            axes[0].set_title("Proton Density (Rho)")
+            axes[0].imshow(rho[0, 0, 0], cmap='gray')
+            axes[0].axis('off')
+            
+            axes[1].set_title("T1 Relaxation Time")
+            axes[1].imshow(t1[0, 0, 0], cmap='viridis')
+            axes[1].axis('off')
+            
+            axes[2].set_title("T2 Relaxation Time")
+            axes[2].imshow(t2[0, 0, 0], cmap='plasma')
+            axes[2].axis('off')
+            
+            plt.tight_layout()
+            _phantom_figure_cache = fig
+        
         result = {
             "status": "success",
             "phantom_type": phantom_type,
@@ -75,11 +100,16 @@ def get_cached_phantom():
     global phantom_cache
     return phantom_cache
 
+def get_cached_phantom_figure():
+    global _phantom_figure_cache
+    return _phantom_figure_cache
+
 def set_cached_phantom(phantom, rho, t1, t2):
     global phantom_cache
     phantom_cache = (phantom, rho, t1, t2)
 
 def clear_phantom_cache():
-    global phantom_cache
+    global phantom_cache, _phantom_figure_cache
     phantom_cache = None
+    _phantom_figure_cache = None
 

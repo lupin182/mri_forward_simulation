@@ -5,7 +5,7 @@ def write_epi_se_sequence(
     plot: bool = False,
     test_report: bool = False,
     write_seq: bool = False,
-    seq_filename: str = 'epi_se_pypulseq.seq',
+    seq_filename: str = 'epi_se11_pypulseq.seq',
     fov: float | tuple[float, float] = 256e-3,
     n_x: int = 64,
     n_y: int = 64,

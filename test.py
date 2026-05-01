@@ -46,6 +46,8 @@ T2 = data[:, 5]
 T2s = data[:, 6]
 delta_omega = data[:, 7]
 print(np.sort(x))
+print(np.sort(y))
+
 # ==========================================
 # 3. 计算 FOV 和 图像尺寸
 # ==========================================
@@ -106,10 +108,10 @@ img_dw[ix, iy, iz] = delta_omega
 # 如果是3D数据，取Z轴的中心切片；如果是2D数据，nz=1，中心切片就是0
 mid_z = nz // 2
 
-fig, axes = plt.subplots(1, 5, figsize=(22, 4))
-titles = ['Rho (Proton Density)', 'T1', 'T2', 'T2*', 'Delta Omega']
-images = [img_rho, img_T1, img_T2, img_T2s, img_dw]
-cmaps = ['gray', 'magma', 'viridis', 'viridis', 'coolwarm']
+fig, axes = plt.subplots(1, 4, figsize=(22, 8))
+titles = ['Rho (Proton Density)', 'T1', 'T2', 'Delta Omega']
+images = [img_rho, img_T1, img_T2,  img_dw]
+cmaps = ['gray', 'magma', 'viridis',  'viridis']
 np.save('img_rho.npy', img_rho)
 np.save('img_T1.npy', img_T1)
 np.save('img_T2.npy', img_T2)
@@ -129,3 +131,64 @@ for i, (ax, img, title, cmap) in enumerate(zip(axes, images, titles, cmaps)):
 
 plt.tight_layout()
 plt.show()
+
+# 关键修改1：添加 constrained_layout=True 【自动居中核心】
+fig, axes = plt.subplots(2, 2, figsize=(16, 12), constrained_layout=True)
+titles = ['Rho (Proton Density)', 'T1', 'T2', 'T2*']
+images = [img_rho, img_T1, img_T2, img_T2s]
+cmaps = ['gray', 'magma', 'viridis', 'viridis']
+
+axes = axes.flat
+
+for i, (ax, img, title, cmap) in enumerate(zip(axes, images, titles, cmaps)):
+    slice_img = img[:, :, mid_z]
+    im = ax.imshow(slice_img, cmap=cmap, origin='lower')
+    ax.set_title(title, fontsize=12)
+    ax.axis('off')
+    # 微调色条大小，避免挤压图像
+    cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+    cbar.ax.tick_params(labelsize=8)
+
+# 关键修改2：删除 plt.tight_layout()（和constrained_layout冲突）
+plt.show()
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ===================== 1. 读取 .npy 文件 =====================
+# 替换成你的 .npy 文件路径（相对路径/绝对路径都可以）
+img_data = img_dw[:, :, mid_z].T  
+
+# ===================== 2. 绘制图像 + 色条 =====================
+# 创建画布
+plt.figure(figsize=(8, 6))
+
+# 绘制图像：cmap是配色方案，vmin/vmax可手动限定色条范围
+im = plt.imshow(
+    img_data,
+    cmap="viridis",    # 科学配色（推荐），灰度用"gray"
+    vmin=np.min(img_data),  # 色条最小值（自动匹配数据）
+    vmax=np.max(img_data)   # 色条最大值（自动匹配数据）
+)
+
+# 添加色条 + 设置单位（关键步骤！）
+cbar = plt.colorbar(im, shrink=0.8)  # shrink缩小色条尺寸，更美观
+
+# ===================== 3. 设置色条单位（按需修改！） =====================
+# 替换成你的数据实际物理单位：温度/压强/高程/像素值/归一化强度等
+cbar.set_label(
+    label="rad/s",  # 单位文本
+    fontsize=12,                 # 字体大小
+    labelpad=10                  # 单位与色条的间距
+)
+
+# ===================== 4. 图像美化 =====================
+plt.title("Delta Omega", fontsize=14)
+plt.axis("off")  # 关闭坐标轴，更干净
+plt.tight_layout()  # 自动调整布局，防止文字截断
+
+# 显示图像
+plt.show()
+
+

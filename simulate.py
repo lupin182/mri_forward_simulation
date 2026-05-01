@@ -192,23 +192,31 @@ def _readout_signal(
     sample_time: float,
     *,
     demodulate_adc: bool,
-) -> complex:
-    """读取信号，使用CuPy加速当GPU可用时。
+) -> xp.ndarray:  # 修改1：返回类型改为 多通道信号数组 (n_coils,)
+    """读取信号，使用CuPy加速当GPU可用时。【多通道适配版】
     
     注意：此函数在每次ADC采样时调用，对于大规模问题可能需要优化。
+    返回：每个接收通道的独立复信号，形状 (n_coils,)
     """
+    # 1. 计算横向磁化矢量（不变）
     mxy = phantom.Mx + 1j * phantom.My
+    
+    # 2. 多通道接收灵敏度权重（不变）
     rx_weight = phantom.rxCoilmg * xp.exp(-1j * phantom.rxCoilpe)
+    
+    # 3. 计算每个通道的信号 (n_coils,) （不变）
     coil_signal = xp.sum(rx_weight * mxy[None, :], axis=1)
-    signal = complex(xp.sum(coil_signal))
 
     if not demodulate_adc or adc is None:
-        return signal
+        return coil_signal  # 修改3：直接返回多通道信号
 
+    # --------------------- 原有相位解调逻辑（完全保留，自动适配多通道） ---------------------
     phase = float(adc.phase_offset) + TWO_PI * float(adc.freq_offset) * sample_time
     if getattr(adc, "phase_modulation", None) is not None and len(adc.phase_modulation) > sample_idx:
         phase += float(adc.phase_modulation[sample_idx])
-    return signal * np.exp(-1j * phase)
+    
+    # 修改4：对【所有通道信号】统一解调（广播运算，自动适配）
+    return coil_signal * xp.exp(-1j * phase)
 
 
 def _simulate_fine_block(

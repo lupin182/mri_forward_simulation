@@ -17,16 +17,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 _image_cache = None
+_figure_cache = None
 
 class ReconstructImageTool(MRISimulationBaseTool):
     name: str = "reconstruct_image"
     description: str = """重建MRI图像并保存（需要先运行模拟）。
     参数说明：
     - output_path: 保存图像的路径，默认保存到output目录
+    - return_figure: 是否返回matplotlib figure对象用于Streamlit展示，默认True
     """
 
     def _run(self, query: str) -> str:
-        global _image_cache
+        global _image_cache, _figure_cache
         
         cached_phantom = get_cached_phantom()
         if cached_phantom is None:
@@ -42,6 +44,7 @@ class ReconstructImageTool(MRISimulationBaseTool):
         
         params = json.loads(query)
         output_path = params.get('output_path', None)
+        return_figure = params.get('return_figure', True)
         
         if output_path is None:
             output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'output')
@@ -52,20 +55,23 @@ class ReconstructImageTool(MRISimulationBaseTool):
         image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
         _image_cache = image_recon
 
-        plt.figure(figsize=(10, 10))
-        plt.subplot(121)
-        plt.title("Reconstruction")
-        plt.imshow(np.abs(image_recon[0]), cmap='gray')
-        plt.axis('off')
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        
+        axes[0].set_title("Reconstruction")
+        axes[0].imshow(np.abs(image_recon[0]), cmap='gray')
+        axes[0].axis('off')
 
-        plt.subplot(122)
-        plt.title("Original Phantom")
-        plt.imshow(rho[0, 0, 0], cmap='gray')
-        plt.axis('off')
+        axes[1].set_title("Original Phantom")
+        axes[1].imshow(rho[0, 0, 0], cmap='gray')
+        axes[1].axis('off')
 
         plt.tight_layout()
-        plt.savefig(output_path)
-        plt.close()
+        
+        if return_figure:
+            _figure_cache = fig
+        else:
+            plt.savefig(output_path)
+            plt.close()
 
         result = {
             "status": "success",
@@ -79,7 +85,12 @@ def get_cached_image():
     global _image_cache
     return _image_cache
 
+def get_cached_figure():
+    global _figure_cache
+    return _figure_cache
+
 def clear_recon_cache():
-    global _image_cache
+    global _image_cache, _figure_cache
     _image_cache = None
+    _figure_cache = None
 
