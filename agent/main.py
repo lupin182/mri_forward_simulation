@@ -9,6 +9,7 @@ device_manager.disable_cupy()
 import requests
 import json
 import re
+from json import JSONDecodeError
 from agent.config import API_KEY, BASE_URL, MODEL
 from agent.tools.phantom_tool import GeneratePhantomTool, clear_phantom_cache
 from agent.tools.simulation_tool import RunSimulationTool, clear_simulation_cache
@@ -28,8 +29,16 @@ class ReActAgent:
         }
         self.max_iterations = 10
 
+    def _build_api_url(self):
+        url = BASE_URL.rstrip("/")
+        if url.endswith("/chat/completions") or url.endswith("/start"):
+            return url
+        if url.endswith("/v1"):
+            return f"{url}/chat/completions"
+        return url
+
     def _call_api(self, messages):
-        url = BASE_URL
+        url = self._build_api_url()
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {API_KEY}"
@@ -41,8 +50,25 @@ class ReActAgent:
             "temperature": 0.7
         }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        result = response.json()
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            detail = ""
+            if getattr(exc, "response", None) is not None:
+                detail = exc.response.text[:500].strip()
+            raise RuntimeError(
+                f"模型接口请求失败：{exc}. URL={url}. {detail}"
+            ) from exc
+
+        try:
+            result = response.json()
+        except JSONDecodeError as exc:
+            preview = response.text[:500].strip()
+            raise RuntimeError(
+                f"模型接口返回了非 JSON 内容，无法解析。URL={url}，"
+                f"HTTP {response.status_code}，返回片段：{preview or '<empty response>'}"
+            ) from exc
         
         if result.get('success') and 'result' in result:
             return result['result']

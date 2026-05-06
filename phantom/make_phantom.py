@@ -4,7 +4,6 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from device_manager import get_xp, device_manager
-import cupy as cp
 xp = get_xp()
 
 def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
