@@ -1,96 +1,106 @@
+"""Image reconstruction tool and in-memory reconstruction cache."""
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from __future__ import annotations
 
-from mri_sim.device_manager import disable_cupy
-disable_cupy()
-
-from agent.tools.base_tool import MRISimulationBaseTool
-from mri_sim.reconstruction import reconstruct_3d_cartesian_fft
-from agent.tools.phantom_tool import get_cached_phantom
-from agent.tools.simulation_tool import get_cached_kspace, get_cached_seq
 import json
+from pathlib import Path
+
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+
+from agent.tools.base_tool import MRISimulationBaseTool
+from agent.tools.phantom_tool import get_cached_phantom
+from agent.tools.simulation_tool import get_cached_kspace, get_cached_seq
+from mri_sim.reconstruction import reconstruct_3d_cartesian_fft_multichannel, sos_reconstruction
+
 
 _image_cache = None
 _figure_cache = None
 
+
 class ReconstructImageTool(MRISimulationBaseTool):
-    name: str = "reconstruct_image"
-    description: str = """重建MRI图像并保存（需要先运行模拟）。
-    参数说明：
-    - output_path: 保存图像的路径，默认保存到output目录
-    - return_figure: 是否返回matplotlib figure对象用于Streamlit展示，默认True
-    """
+    name = "reconstruct_image"
+    description = "Reconstruct MRI image after simulation. JSON params: output_path, return_figure."
 
     def _run(self, query: str) -> str:
         global _image_cache, _figure_cache
-        
+
         cached_phantom = get_cached_phantom()
         if cached_phantom is None:
-            return json.dumps({"status": "error", "message": "请先生成体模"})
-        
-        phantom, rho, _, _ = cached_phantom
-        
-        k_space_signal = get_cached_kspace()
+            return json.dumps({"status": "error", "message": "Generate or load a phantom first."})
+
+        kspace = get_cached_kspace()
         seq = get_cached_seq()
-        
-        if k_space_signal is None or seq is None:
-            return json.dumps({"status": "error", "message": "请先运行模拟"})
-        
-        params = json.loads(query)
-        output_path = params.get('output_path', None)
-        return_figure = params.get('return_figure', True)
-        
-        if output_path is None:
-            output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'output')
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, 'mri_result.png')
+        if kspace is None or seq is None:
+            return json.dumps({"status": "error", "message": "Run simulation first."})
+
+        phantom, rho, _, _ = cached_phantom
+        params = json.loads(query or "{}")
+        return_figure = bool(params.get("return_figure", True))
+        output_path = Path(params.get("output_path", "output/mri_result.png"))
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
         k_traj_adc, _, _, _, _ = seq.calculate_kspace()
-        image_recon, _ = reconstruct_3d_cartesian_fft(k_space_signal, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
-        _image_cache = image_recon
+        signal = np.asarray(kspace)
+        recon_input = signal.T if signal.ndim == 2 else signal.squeeze()
+        coil_images, _ = reconstruct_3d_cartesian_fft_multichannel(
+            recon_input,
+            k_traj_adc,
+            Ny=phantom.Ny,
+            Nx=phantom.Nx,
+            Nz=phantom.Nz,
+        )
+        image = sos_reconstruction(coil_images) if coil_images.ndim == 4 else coil_images
+        _image_cache = image
 
         fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        
         axes[0].set_title("Reconstruction")
-        axes[0].imshow(np.abs(image_recon[0]), cmap='gray')
-        axes[0].axis('off')
-
+        axes[0].imshow(_to_2d_magnitude(image), cmap="gray")
+        axes[0].axis("off")
         axes[1].set_title("Original Phantom")
-        axes[1].imshow(rho[0, 0, 0], cmap='gray')
-        axes[1].axis('off')
+        axes[1].imshow(rho[0, 0, 0], cmap="gray")
+        axes[1].axis("off")
+        fig.tight_layout()
 
-        plt.tight_layout()
-        
         if return_figure:
             _figure_cache = fig
         else:
-            plt.savefig(output_path)
-            plt.close()
+            fig.savefig(output_path)
+            plt.close(fig)
 
-        result = {
-            "status": "success",
-            "phantom_shape": (phantom.Nz, phantom.Nx, phantom.Ny),
-            "output_path": output_path
-        }
+        return json.dumps(
+            {
+                "status": "success",
+                "phantom_shape": [phantom.Nz, phantom.Nx, phantom.Ny],
+                "image_shape": list(np.asarray(image).shape),
+                "output_path": str(output_path),
+            },
+            ensure_ascii=False,
+        )
 
-        return json.dumps(result, ensure_ascii=False)
 
 def get_cached_image():
-    global _image_cache
     return _image_cache
 
+
 def get_cached_figure():
-    global _figure_cache
     return _figure_cache
 
-def clear_recon_cache():
+
+def clear_recon_cache() -> None:
     global _image_cache, _figure_cache
     _image_cache = None
     _figure_cache = None
 
+
+def _to_2d_magnitude(image) -> np.ndarray:
+    data = np.abs(np.asarray(image))
+    data = np.squeeze(data)
+    if data.ndim == 2:
+        return data
+    if data.ndim == 3:
+        return data[0]
+    raise ValueError(f"Expected 2D or 3D image data, got shape {data.shape}.")

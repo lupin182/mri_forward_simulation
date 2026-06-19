@@ -1,5 +1,11 @@
+"""MRI simulation agent package."""
 
-from .config import API_KEY, BASE_URL, MODEL
+__all__ = ["ReActAgent"]
 
-__all__ = ["API_KEY", "BASE_URL", "MODEL"]
 
+def __getattr__(name: str):
+    if name == "ReActAgent":
+        from agent.react_agent import ReActAgent
+
+        return ReActAgent
+    raise AttributeError(name)

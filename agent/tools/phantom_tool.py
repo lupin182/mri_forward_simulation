@@ -1,115 +1,114 @@
+"""Phantom generation tool and in-memory phantom cache."""
 
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from __future__ import annotations
 
-from mri_sim.device_manager import disable_cupy
-disable_cupy()
+import json
+from typing import Any
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from agent.tools.base_tool import MRISimulationBaseTool
 from mri_sim.phantom import (
+    Phantom,
     generate_simple_asymmetric_phantom,
     generate_simple_ring_phantom,
     generate_simple_sphere_phantom,
-    Phantom
 )
-import json
-import pickle
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import numpy as np
 
-phantom_cache = None
+
+phantom_cache: tuple[Phantom, Any, Any, Any] | None = None
 _phantom_figure_cache = None
 
+
 class GeneratePhantomTool(MRISimulationBaseTool):
-    name: str = "generate_phantom"
-    description: str = """生成MRI体模数据。
-    参数说明：
-    - phantom_type: 体模类型，可选 'asymmetric'（非对称，默认）、'ring'（圆环）、'sphere'（球体）
-    - Nz: z轴切片数，默认1
-    - Nx: x轴分辨率，默认64
-    - Ny: y轴分辨率，默认64
-    - inner_radius: 圆环内半径（仅ring类型），默认10
-    - outer_radius: 圆环外半径（仅ring类型），默认20
-    - radius: 球体半径（仅sphere类型），默认16
-    - fov_x: x轴视场（米），默认0.256
-    - fov_y: y轴视场（米），默认0.256
-    - slice_thickness: 切片厚度（米），默认0.004
-    - return_figure: 是否返回matplotlib figure对象用于Streamlit展示，默认True
-    """
+    name = "generate_phantom"
+    description = (
+        "Generate an MRI phantom. JSON params: phantom_type "
+        "(asymmetric, ring, sphere), Nz, Nx, Ny, fov_x, fov_y, slice_thickness, "
+        "radius, inner_radius, outer_radius, return_figure."
+    )
 
     def _run(self, query: str) -> str:
-        global phantom_cache, _phantom_figure_cache
-        
-        params = json.loads(query)
-        phantom_type = params.get('phantom_type', 'asymmetric')
-        Nz = params.get('Nz', 1)
-        Nx = params.get('Nx', 64)
-        Ny = params.get('Ny', 64)
-        fov_x = params.get('fov_x', 0.256)
-        fov_y = params.get('fov_y', 0.256)
-        slice_thickness = params.get('slice_thickness', 0.004)
-        return_figure = params.get('return_figure', True)
+        params = json.loads(query or "{}")
+        phantom_type = params.get("phantom_type", "asymmetric")
+        nz = int(params.get("Nz", params.get("nz", 1)))
+        nx = int(params.get("Nx", params.get("nx", 64)))
+        ny = int(params.get("Ny", params.get("ny", 64)))
+        fov_x = float(params.get("fov_x", 0.256))
+        fov_y = float(params.get("fov_y", 0.256))
+        slice_thickness = float(params.get("slice_thickness", 0.004))
+        return_figure = bool(params.get("return_figure", True))
 
-        if phantom_type == 'asymmetric':
-            rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=Nz, Nx=Nx, Ny=Ny)
-        elif phantom_type == 'ring':
-            inner_radius = params.get('inner_radius', 10)
-            outer_radius = params.get('outer_radius', 20)
-            rho, t1, t2 = generate_simple_ring_phantom(Nz=Nz, Nx=Nx, Ny=Ny, inner_radius=inner_radius, outer_radius=outer_radius)
-        elif phantom_type == 'sphere':
-            radius = params.get('radius', 16)
-            rho, t1, t2 = generate_simple_sphere_phantom(Nz=Nz, Nx=Nx, Ny=Ny, radius=radius)
+        if phantom_type == "asymmetric":
+            rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=nz, Nx=nx, Ny=ny)
+        elif phantom_type == "ring":
+            rho, t1, t2 = generate_simple_ring_phantom(
+                Nz=nz,
+                Nx=nx,
+                Ny=ny,
+                inner_radius=int(params.get("inner_radius", 10)),
+                outer_radius=int(params.get("outer_radius", 20)),
+            )
+        elif phantom_type == "sphere":
+            rho, t1, t2 = generate_simple_sphere_phantom(
+                Nz=nz,
+                Nx=nx,
+                Ny=ny,
+                radius=int(params.get("radius", 16)),
+            )
         else:
-            return json.dumps({"status": "error", "message": f"未知的体模类型 '{phantom_type}'"})
+            return json.dumps({"status": "error", "message": f"Unknown phantom_type: {phantom_type}"})
 
         phantom = Phantom(rho, t1, t2, fov_x=fov_x, fov_y=fov_y, slice_thickness=slice_thickness)
         set_cached_phantom(phantom, rho, t1, t2)
-        
+
         if return_figure:
-            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-            
-            axes[0].set_title("Proton Density (Rho)")
-            axes[0].imshow(rho[0, 0, 0], cmap='gray')
-            axes[0].axis('off')
-            
-            axes[1].set_title("T1 Relaxation Time")
-            axes[1].imshow(t1[0, 0, 0], cmap='viridis')
-            axes[1].axis('off')
-            
-            axes[2].set_title("T2 Relaxation Time")
-            axes[2].imshow(t2[0, 0, 0], cmap='plasma')
-            axes[2].axis('off')
-            
-            plt.tight_layout()
-            _phantom_figure_cache = fig
-        
-        result = {
-            "status": "success",
-            "phantom_type": phantom_type,
-            "shape": (phantom.Nz, phantom.Nx, phantom.Ny),
-            "fov": (fov_x, fov_y),
-            "slice_thickness": slice_thickness
-        }
-        
-        return json.dumps(result, ensure_ascii=False)
+            _set_phantom_figure(rho, t1, t2)
+
+        return json.dumps(
+            {
+                "status": "success",
+                "phantom_type": phantom_type,
+                "shape": [phantom.Nz, phantom.Nx, phantom.Ny],
+                "fov": [fov_x, fov_y],
+                "slice_thickness": slice_thickness,
+            },
+            ensure_ascii=False,
+        )
+
+
+def _set_phantom_figure(rho, t1, t2) -> None:
+    global _phantom_figure_cache
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    for ax, title, data, cmap in [
+        (axes[0], "Proton Density", rho[0, 0, 0], "gray"),
+        (axes[1], "T1", t1[0, 0, 0], "viridis"),
+        (axes[2], "T2", t2[0, 0, 0], "plasma"),
+    ]:
+        ax.set_title(title)
+        ax.imshow(data, cmap=cmap)
+        ax.axis("off")
+    fig.tight_layout()
+    _phantom_figure_cache = fig
+
 
 def get_cached_phantom():
-    global phantom_cache
     return phantom_cache
 
+
 def get_cached_phantom_figure():
-    global _phantom_figure_cache
     return _phantom_figure_cache
 
-def set_cached_phantom(phantom, rho, t1, t2):
+
+def set_cached_phantom(phantom, rho, t1, t2) -> None:
     global phantom_cache
     phantom_cache = (phantom, rho, t1, t2)
 
-def clear_phantom_cache():
+
+def clear_phantom_cache() -> None:
     global phantom_cache, _phantom_figure_cache
     phantom_cache = None
     _phantom_figure_cache = None
-

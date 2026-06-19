@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -153,8 +155,8 @@ def _add_rf_artifact(args: argparse.Namespace, t_adc: np.ndarray, kspace: np.nda
 
 
 def _save_png(path: Path, image: np.ndarray, reference: np.ndarray, title: str) -> None:
-    image_2d = np.abs(np.squeeze(image)[0] if image.ndim == 3 else np.squeeze(image))
-    reference_2d = np.abs(np.squeeze(reference)[0] if reference.ndim == 3 else np.squeeze(reference))
+    image_2d = _to_2d_magnitude(image)
+    reference_2d = _to_2d_magnitude(reference)
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].set_title(title)
@@ -166,6 +168,16 @@ def _save_png(path: Path, image: np.ndarray, reference: np.ndarray, title: str) 
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
+
+
+def _to_2d_magnitude(image: np.ndarray) -> np.ndarray:
+    data = np.abs(np.asarray(image))
+    data = np.squeeze(data)
+    if data.ndim == 2:
+        return data
+    if data.ndim == 3:
+        return data[0]
+    raise ValueError(f"Expected 2D or 3D image data, got shape {data.shape}.")
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
@@ -218,7 +230,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_simulation_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the MRI forward simulation pipeline without a UI.")
     parser.add_argument("--phantom", choices=["asymmetric", "sphere", "ring", "database"], default="asymmetric")
     parser.add_argument("--phantom-name", default=None)
@@ -249,8 +261,55 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def build_root_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="MRI forward simulation and agent platform.")
+    subparsers = parser.add_subparsers(dest="command")
+    subparsers.add_parser("simulate", help="Run the MRI forward simulation CLI.")
+    subparsers.add_parser("agent-cli", help="Run the ReAct agent in an interactive terminal.")
+    agent_ui = subparsers.add_parser("agent-ui", help="Start the Streamlit agent UI.")
+    agent_ui.add_argument("--server-port", type=int, default=None)
+    agent_ui.add_argument("--server-address", default=None)
+    return parser
+
+
+def run_agent_ui(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description="Start the Streamlit MRI agent UI.")
+    parser.add_argument("--server-port", type=int, default=None)
+    parser.add_argument("--server-address", default=None)
+    args = parser.parse_args(argv)
+
+    streamlit_app = Path(__file__).resolve().parent / "agent" / "streamlit_app.py"
+    command = [sys.executable, "-m", "streamlit", "run", str(streamlit_app)]
+    if args.server_port is not None:
+        command.extend(["--server.port", str(args.server_port)])
+    if args.server_address is not None:
+        command.extend(["--server.address", args.server_address])
+    subprocess.run(command, check=True)
+
+
+def main(argv: list[str] | None = None) -> None:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] == "simulate":
+        args = build_simulation_parser().parse_args(argv[1:])
+    elif argv and argv[0] == "agent-cli":
+        from agent.react_agent import run_interactive_cli
+
+        run_interactive_cli()
+        return
+    elif argv and argv[0] == "agent-ui":
+        run_agent_ui(argv[1:])
+        return
+    elif argv in (["-h"], ["--help"]):
+        build_root_parser().print_help()
+        return
+    elif argv and not argv[0].startswith("-"):
+        build_root_parser().parse_args(argv)
+        return
+    else:
+        args = build_simulation_parser().parse_args(argv)
+
     summary = run_pipeline(args)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
