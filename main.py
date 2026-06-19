@@ -19,28 +19,29 @@ from mri_sim.phantom import (
     generate_simple_ring_phantom,
     generate_simple_sphere_phantom,
 )
+from mri_sim.phantom_database import load_phantom_dataset
+from mri_sim.phantom_database import (
+    create_phantom_database_entry,
+    delete_phantom_database_data,
+    delete_phantom_database_entry,
+    import_phantom_database_file,
+    list_phantom_database,
+)
 from mri_sim.reconstruction import reconstruct_3d_cartesian_fft_multichannel, sos_reconstruction
 from mri_sim.sequences import get_sequence
 from mri_sim.simulation import SimulationConfig, simulate
 
 
 DEFAULT_OUTPUT_DIR = Path("output")
-PHANTOM_DATABASE_DIR = Path(__file__).resolve().parent / "mri_sim" / "phantom_depository"
+DEFAULT_FOV_X = 0.256
+DEFAULT_FOV_Y = 0.256
+DEFAULT_SLICE_THICKNESS = 0.004
 
 
 def _parse_csv_floats(value: str) -> list[float]:
     if not value:
         return []
     return [float(item.strip()) for item in value.split(",") if item.strip()]
-
-
-def _load_database_phantom(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    phantom_dir = PHANTOM_DATABASE_DIR / name
-    required = [phantom_dir / "rho.npy", phantom_dir / "t1.npy", phantom_dir / "t2.npy"]
-    missing = [str(path) for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(f"Missing phantom database files: {', '.join(missing)}")
-    return tuple(np.load(path) for path in required)  # type: ignore[return-value]
 
 
 def _build_phantom(args: argparse.Namespace) -> tuple[Phantom, np.ndarray, np.ndarray, np.ndarray]:
@@ -59,7 +60,20 @@ def _build_phantom(args: argparse.Namespace) -> tuple[Phantom, np.ndarray, np.nd
     elif args.phantom == "database":
         if not args.phantom_name:
             raise ValueError("--phantom-name is required when --phantom database is used.")
-        rho, t1, t2 = _load_database_phantom(args.phantom_name)
+        dataset = load_phantom_dataset(args.phantom_name)
+        phantom = dataset.build_phantom(
+            fov_x=args.fov_x,
+            fov_y=args.fov_y,
+            slice_thickness=args.slice_thickness,
+        )
+        if args.b0_artifact:
+            generate_B0_inhomogeneity(
+                phantom,
+                mode=args.b0_mode,
+                delta_B0_ppm=args.b0_delta_ppm,
+                axis=args.b0_axis,
+            )
+        return phantom, dataset.rho, dataset.t1, dataset.t2
     else:
         raise ValueError(f"Unsupported phantom type: {args.phantom}")
 
@@ -67,9 +81,9 @@ def _build_phantom(args: argparse.Namespace) -> tuple[Phantom, np.ndarray, np.nd
         rho,
         t1,
         t2,
-        fov_x=args.fov_x,
-        fov_y=args.fov_y,
-        slice_thickness=args.slice_thickness,
+        fov_x=args.fov_x if args.fov_x is not None else DEFAULT_FOV_X,
+        fov_y=args.fov_y if args.fov_y is not None else DEFAULT_FOV_Y,
+        slice_thickness=args.slice_thickness if args.slice_thickness is not None else DEFAULT_SLICE_THICKNESS,
     )
     if args.b0_artifact:
         generate_B0_inhomogeneity(
@@ -170,6 +184,15 @@ def _save_png(path: Path, image: np.ndarray, reference: np.ndarray, title: str) 
     plt.close(fig)
 
 
+def _reference_rho(rho: np.ndarray) -> np.ndarray:
+    data = np.asarray(rho)
+    if data.ndim == 5:
+        return data[0, 0]
+    if data.ndim in {2, 3}:
+        return data
+    raise ValueError(f"Expected rho shape (Nz, Nx, Ny) or (TypeNum, SpinNum, Nz, Nx, Ny), got {data.shape}.")
+
+
 def _to_2d_magnitude(image: np.ndarray) -> np.ndarray:
     data = np.abs(np.asarray(image))
     data = np.squeeze(data)
@@ -198,7 +221,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     np.save(output_dir / "reconstruction.npy", image)
     np.save(output_dir / "reconstruction_magnitude.npy", np.abs(image))
     if not args.no_plot:
-        _save_png(output_dir / "reconstruction.png", image, rho[0, 0], "Reconstruction")
+        _save_png(output_dir / "reconstruction.png", image, _reference_rho(rho), "Reconstruction")
 
     summary: dict[str, Any] = {
         "phantom": args.phantom,
@@ -220,7 +243,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         np.save(output_dir / "reconstruction_rf_artifact.npy", artifact_image)
         np.save(output_dir / "reconstruction_rf_artifact_magnitude.npy", np.abs(artifact_image))
         if not args.no_plot:
-            _save_png(output_dir / "reconstruction_rf_artifact.png", artifact_image, rho[0, 0], "RF Artifact")
+            _save_png(output_dir / "reconstruction_rf_artifact.png", artifact_image, _reference_rho(rho), "RF Artifact")
         summary["rf_artifact"] = True
         summary["artifact_kspace_shape"] = list(np.asarray(artifact_kspace).shape)
         summary["artifact_reconstruction_shape"] = list(np.asarray(artifact_image).shape)
@@ -238,9 +261,9 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nx", type=int, default=64)
     parser.add_argument("--ny", type=int, default=64)
     parser.add_argument("--nz", type=int, default=1)
-    parser.add_argument("--fov-x", type=float, default=0.256)
-    parser.add_argument("--fov-y", type=float, default=0.256)
-    parser.add_argument("--slice-thickness", type=float, default=0.004)
+    parser.add_argument("--fov-x", type=float, default=None)
+    parser.add_argument("--fov-y", type=float, default=None)
+    parser.add_argument("--slice-thickness", type=float, default=None)
     parser.add_argument("--tr", type=float, default=0.1)
     parser.add_argument("--te", type=float, default=0.02)
     parser.add_argument("--fine-dt", type=float, default=1e-5)
@@ -259,6 +282,51 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-plot", action="store_true")
     return parser
+
+
+def build_database_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage the local MRI phantom database.")
+    subparsers = parser.add_subparsers(dest="database_command", required=True)
+
+    subparsers.add_parser("list", help="List available database phantoms.")
+
+    create_parser = subparsers.add_parser("create", help="Create a new phantom database entry.")
+    create_parser.add_argument("--name", required=True, help="New phantom name and directory name.")
+    create_parser.add_argument("--description", required=True, help="Description written to phantom_depository/info.txt.")
+
+    load_parser = subparsers.add_parser("load", help="Import one legal phantom data file into an existing database entry.")
+    load_parser.add_argument("--name", required=True, help="Target phantom name.")
+    load_parser.add_argument("--file-path", required=True, help="Source file to copy into the phantom directory.")
+    load_parser.add_argument(
+        "--data",
+        required=True,
+        help="Data name: rho, t1, t2, dB0, CS, dWRnd, txCoilmg, txCoilpe, rxCoilmg, rxCoilpe, or info.",
+    )
+
+    delete_parser = subparsers.add_parser("delete", help="Delete one phantom data file or an entire phantom entry.")
+    delete_parser.add_argument("--name", required=True, help="Target phantom name.")
+    delete_group = delete_parser.add_mutually_exclusive_group(required=True)
+    delete_group.add_argument("--data", help="Delete one data file by legal data name.")
+    delete_group.add_argument("--all", action="store_true", help="Delete the entire phantom directory and index entry.")
+    return parser
+
+
+def run_database_command(args: argparse.Namespace) -> dict[str, Any]:
+    if args.database_command == "list":
+        return {"status": "success", "phantoms": list_phantom_database()}
+    if args.database_command == "create":
+        result = create_phantom_database_entry(args.name, args.description)
+        return {"status": "success", **result}
+    if args.database_command == "load":
+        result = import_phantom_database_file(args.name, args.file_path, args.data)
+        return {"status": "success", **result}
+    if args.database_command == "delete":
+        if args.all:
+            result = delete_phantom_database_entry(args.name)
+        else:
+            result = delete_phantom_database_data(args.name, args.data)
+        return {"status": "success", **result}
+    raise ValueError(f"Unsupported database command: {args.database_command}")
 
 
 def build_root_parser() -> argparse.ArgumentParser:
@@ -292,6 +360,11 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
 
     if argv and argv[0] == "simulate":
+        if len(argv) > 1 and argv[1] == "database":
+            args = build_database_parser().parse_args(argv[2:])
+            result = run_database_command(args)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return
         args = build_simulation_parser().parse_args(argv[1:])
     elif argv and argv[0] == "agent-cli":
         from agent.react_agent import run_interactive_cli

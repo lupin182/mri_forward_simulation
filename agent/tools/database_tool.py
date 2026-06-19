@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-
-import numpy as np
 
 from agent.tools.base_tool import MRISimulationBaseTool
 from agent.tools.phantom_tool import set_cached_phantom
-from mri_sim.phantom import Phantom
-
-
-DEPOSITORY_PATH = Path(__file__).resolve().parents[2] / "mri_sim" / "phantom_depository"
+from mri_sim.phantom_database import (
+    PHANTOM_DATABASE_DIR,
+    list_phantom_database,
+    load_phantom_dataset,
+)
 
 
 class ListPhantomDatabaseTool(MRISimulationBaseTool):
@@ -20,22 +18,10 @@ class ListPhantomDatabaseTool(MRISimulationBaseTool):
     description = "List available phantoms in the local phantom database."
 
     def _run(self, query: str) -> str:
-        if not DEPOSITORY_PATH.exists():
-            return json.dumps({"status": "error", "message": f"Database path does not exist: {DEPOSITORY_PATH}"})
+        if not PHANTOM_DATABASE_DIR.exists():
+            return json.dumps({"status": "error", "message": f"Database path does not exist: {PHANTOM_DATABASE_DIR}"})
 
-        phantoms = []
-        index_files = [path for path in DEPOSITORY_PATH.glob("*.txt") if path.is_file()]
-        if index_files:
-            for line in index_files[0].read_text(encoding="utf-8").splitlines():
-                if ":" in line:
-                    name, description = line.split(":", 1)
-                    phantoms.append({"name": name.strip(), "description": description.strip()})
-
-        if not phantoms:
-            for path in DEPOSITORY_PATH.iterdir():
-                if path.is_dir() and all((path / name).exists() for name in ("rho.npy", "t1.npy", "t2.npy")):
-                    phantoms.append({"name": path.name, "description": "MRI phantom dataset"})
-
+        phantoms = list_phantom_database(PHANTOM_DATABASE_DIR)
         return json.dumps({"status": "success", "phantoms": phantoms, "count": len(phantoms)}, ensure_ascii=False)
 
 
@@ -49,34 +35,13 @@ class LoadPhantomFromDatabaseTool(MRISimulationBaseTool):
         if not phantom_name:
             return json.dumps({"status": "error", "message": "phantom_name is required."})
 
-        phantom_dir = DEPOSITORY_PATH / str(phantom_name)
-        if not phantom_dir.exists():
-            return json.dumps({"status": "error", "message": f"Unknown phantom: {phantom_name}"})
+        try:
+            dataset = load_phantom_dataset(str(phantom_name), PHANTOM_DATABASE_DIR)
+            phantom = dataset.build_phantom()
+        except Exception as exc:
+            return json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False)
 
-        required = {name: phantom_dir / f"{name}.npy" for name in ("rho", "t1", "t2")}
-        missing = [str(path) for path in required.values() if not path.exists()]
-        if missing:
-            return json.dumps({"status": "error", "message": f"Missing phantom files: {', '.join(missing)}"})
-
-        rho = np.load(required["rho"])
-        t1 = np.load(required["t1"])
-        t2 = np.load(required["t2"])
-        metadata = _load_metadata(phantom_dir)
-        optional = _load_optional_arrays(phantom_dir)
-
-        phantom = Phantom(
-            rho=rho,
-            t1=t1,
-            t2=t2,
-            fov_x=float(metadata.get("fov_x", 0.256)),
-            fov_y=float(metadata.get("fov_y", 0.256)),
-            slice_thickness=float(metadata.get("slice_thickness", 0.004)),
-            RxCoilNum=int(metadata.get("RxCoilNum", 1)),
-            TxCoilNum=int(metadata.get("TxCoilNum", 1)),
-            B0=float(metadata.get("B0", 3.0)),
-            **optional,
-        )
-        set_cached_phantom(phantom, rho, t1, t2)
+        set_cached_phantom(phantom, dataset.rho, dataset.t1, dataset.t2)
 
         return json.dumps(
             {
@@ -85,29 +50,9 @@ class LoadPhantomFromDatabaseTool(MRISimulationBaseTool):
                 "shape": [phantom.Nz, phantom.Nx, phantom.Ny],
                 "fov": [phantom.fov_x, phantom.fov_y],
                 "slice_thickness": phantom.slice_thickness,
+                "rx_coils": phantom.RxCoilNum,
+                "tx_coils": phantom.TxCoilNum,
+                "optional_arrays": sorted(dataset.optional_arrays),
             },
             ensure_ascii=False,
         )
-
-
-def _load_metadata(phantom_dir: Path) -> dict[str, str]:
-    metadata = {}
-    for path in phantom_dir.glob("*.txt"):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if ":" in line:
-                key, value = line.split(":", 1)
-                metadata[key.strip()] = value.strip()
-    return metadata
-
-
-def _load_optional_arrays(phantom_dir: Path) -> dict[str, np.ndarray]:
-    mapping = {
-        "dB0.npy": "dB0",
-        "CS.npy": "CS",
-        "dWRnd.npy": "dWRnd",
-        "txCoilmg.npy": "txCoilmg",
-        "rxCoilmg.npy": "rxCoilmg",
-        "txCoilpe.npy": "txCoilpe",
-        "rxCoilpe.npy": "rxCoilpe",
-    }
-    return {argument: np.load(phantom_dir / filename) for filename, argument in mapping.items() if (phantom_dir / filename).exists()}
