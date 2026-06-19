@@ -138,6 +138,6 @@ def is_using_cupy():
 
 # 全局设备管理器实例
 device_manager = DeviceManager()
-disable_cupy()
+
 # 便捷的访问方式
 xp = device_manager.xp

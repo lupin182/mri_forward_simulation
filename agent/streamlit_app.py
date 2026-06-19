@@ -439,20 +439,13 @@ def render_workflow(snapshot):
         ("02 仿真", "写入序列并执行 Bloch 前向模拟。", snapshot["kspace_ready"]),
         ("03 重建", "FFT 重建并对照原始体模。", snapshot["recon_ready"]),
     ]
-    html = ['<div class="workflow">']
+    html_parts = ['<div class="workflow">']
     for name, desc, ready in steps:
         klass = "step ready" if ready else "step"
         state = "已完成" if ready else "等待"
-        html.append(
-            f"""
-            <div class="{klass}">
-                <div class="step-name">{name} · {state}</div>
-                <div class="step-desc">{desc}</div>
-            </div>
-            """
-        )
-    html.append("</div>")
-    st.markdown("".join(html), unsafe_allow_html=True)
+        html_parts.append('<div class="%s"><div class="step-name">%s · %s</div><div class="step-desc">%s</div></div>' % (klass, name, state, desc))
+    html_parts.append("</div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 def build_fallback_figure(view_type):
