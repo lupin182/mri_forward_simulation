@@ -3,8 +3,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 
 from typing import List, Dict, Any
 from langchain_openai import ChatOpenAI
@@ -13,7 +13,7 @@ from langchain_core.tools import BaseTool
 from agent.config import API_KEY, BASE_URL, MODEL, TEMPERATURE, MAX_TOKENS
 from agent.tools.phantom_tool import GeneratePhantomTool
 from agent.tools.simulation_tool import RunSimulationTool
-from agent.tools.recon_tool import ReconstructAndVisualizeTool
+from agent.tools.recon_tool import ReconstructImageTool
 import json
 
 class MRIAgent:
@@ -39,7 +39,7 @@ class MRIAgent:
         self.tools = [
             GeneratePhantomTool(),
             RunSimulationTool(),
-            ReconstructAndVisualizeTool()
+            ReconstructImageTool()
         ]
         
         self.tool_map = {tool.name: tool for tool in self.tools}

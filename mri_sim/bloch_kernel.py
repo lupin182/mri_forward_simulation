@@ -18,7 +18,7 @@ GPU不可用时回退到NumPy CPU计算。
 
 from __future__ import annotations
 
-from device_manager import get_xp, device_manager
+from .device_manager import get_xp, device_manager
 
 xp = get_xp()
 TWO_PI = 2.0 * xp.pi

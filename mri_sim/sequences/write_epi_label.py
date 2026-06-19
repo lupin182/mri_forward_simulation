@@ -196,6 +196,3 @@ def write_epi_label_sequence(
 
     return seq
 
-
-if __name__ == '__main__':
-    main(plot=True, write_seq=True)

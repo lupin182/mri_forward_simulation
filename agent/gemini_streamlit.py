@@ -3,8 +3,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 import numpy as np
 import json
 import matplotlib

@@ -9,8 +9,8 @@ import copy
 
 import numpy as np
 
-from phantom.make_phantom import Phantom
-from device_manager import get_xp, device_manager
+from .phantom import Phantom
+from .device_manager import get_xp, device_manager
 
 xp = get_xp()
 

@@ -3,17 +3,17 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 
 from agent.tools.base_tool import MRISimulationBaseTool
 from agent.tools.phantom_tool import set_cached_phantom
-from phantom.make_phantom import Phantom
+from mri_sim.phantom import Phantom
 import json
 import numpy as np
 import re
 
-DEPOSITORY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'phantom', 'phantom_depository')
+DEPOSITORY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'mri_sim', 'phantom_depository')
 
 _list_phantom_cache = None
 

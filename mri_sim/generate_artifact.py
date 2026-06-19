@@ -1,4 +1,4 @@
-from device_manager import device_manager
+from .device_manager import device_manager
 import numpy as np
 
 def generate_rf_artifact(t_adc, k_space_signal, 
@@ -112,7 +112,7 @@ def generate_rf_artifact_real(t_adc, k_space_signal,
     return k_space_with_artifact.squeeze()
 
 
-from phantom.make_phantom import Phantom
+from .phantom import Phantom
 def generate_B0_inhomogeneity(phantom:Phantom, mode: str, delta_B0_ppm: float, axis: str = 'x'):
     """
     生成3T主磁场不均匀性场图，输出单位：特斯拉（T）

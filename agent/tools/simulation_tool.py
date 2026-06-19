@@ -3,17 +3,17 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 
 from agent.tools.base_tool import MRISimulationBaseTool
-from simulate import SimulationConfig, simulate
-from Sequence.write_gre import write_gre_sequence
-from Sequence.write_gre_label import write_gre_label_sequence
-from Sequence.write_se import write_se_sequence
-from Sequence.write_epi import write_epi_sequence
-from Sequence.write_epi_se import write_epi_se_sequence
-from Sequence.write_epi_label import write_epi_label_sequence
+from mri_sim.simulation import SimulationConfig, simulate
+from mri_sim.sequences.write_gre import write_gre_sequence
+from mri_sim.sequences.write_gre_label import write_gre_label_sequence
+from mri_sim.sequences.write_se import write_se_sequence
+from mri_sim.sequences.write_epi import write_epi_sequence
+from mri_sim.sequences.write_epi_se import write_epi_se_sequence
+from mri_sim.sequences.write_epi_label import write_epi_label_sequence
 from agent.tools.phantom_tool import get_cached_phantom
 import json
 import matplotlib

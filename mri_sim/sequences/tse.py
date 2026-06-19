@@ -331,6 +331,3 @@ def main(
 
     return seq
 
-
-if __name__ == '__main__':
-    main(write_seq=True)

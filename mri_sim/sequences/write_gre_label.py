@@ -2,23 +2,26 @@ import numpy as np
 import pypulseq as pp
 
 
-def write_gre_sequence(
+def write_gre_label_sequence(
     plot: bool = False,
     test_report: bool = False,
     write_seq: bool = False,
-    seq_filename: str = 'gre_pypulseq.seq',
-    fov: float | tuple[float, float] = 256e-3,
+    seq_filename: str = 'gre_label_pypulseq.seq',
+    *,
+    fov: float | tuple[float, float] = 224e-3,
     n_x: int = 64,
-    n_y: int = 64,
-    flip_angle_deg: float = 10,
+    n_y: int | None = 64,
+    flip_angle_deg: float = 7,
     slice_thickness: float = 3e-3,
-    tr: float = 12e-3,
-    te: float = 5e-3,
+    n_slices: int = 1,
+    te: float = 4.3e-3,
+    tr: float = 10e-3,
+    readout_duration: float = 3.2e-3,
     rf_spoiling_inc_deg: float = 117.0,
     dummy_scans: int = 0,
-    ideal_spoiling_reset: bool = False,
+    ideal_spoiling_reset: bool = True,
 ):
-    """Create a basic gradient echo (GRE) sequence.
+    """Create a GRE sequence with labels for data header control.
 
     Parameters
     ----------
@@ -29,22 +32,26 @@ def write_gre_sequence(
     write_seq : bool, optional
         Write the sequence to a .seq file. Default is False.
     seq_filename : str, optional
-        Output filename for the .seq file. Default is 'gre_pypulseq.seq'.
+        Output filename for the .seq file. Default is 'gre_label_pypulseq.seq'.
     fov : float or tuple of float, optional
         Field of view in meters. If a single value, it is used for both x and y.
-        If a tuple, it is (fov_x, fov_y). Default is 256e-3.
+        If a tuple, it is (fov_x, fov_y). Default is 224e-3.
     n_x : int, optional
         Number of readout samples. Default is 64.
-    n_y : int, optional
-        Number of phase encoding steps. Default is 64.
+    n_y : int or None, optional
+        Number of phase encoding steps. Default is None (same as n_x).
     flip_angle_deg : float, optional
-        Flip angle in degrees. Default is 10.
+        Flip angle in degrees. Default is 7.0.
     slice_thickness : float, optional
         Slice thickness in meters. Default is 3e-3.
-    tr : float, optional
-        Repetition time in seconds. Default is 12e-3.
+    n_slices : int, optional
+        Number of slices. Default is 1.
     te : float, optional
-        Echo time in seconds. Default is 5e-3.
+        Echo time in seconds. Default is 4.3e-3.
+    tr : float, optional
+        Repetition time in seconds. Default is 10e-3.
+    readout_duration : float, optional
+        ADC readout duration in seconds. Default is 3.2e-3.
     ideal_spoiling_reset : bool, optional
         When True, add a PyPulseq label on the TR spoiler block so the simulator
         can enforce ideal spoiling by zeroing transverse magnetization there.
@@ -55,13 +62,15 @@ def write_gre_sequence(
         The GRE sequence object.
     """
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
+    if n_y is None:
+        n_y = n_x
     rf_spoiling_inc = rf_spoiling_inc_deg
 
     # Set system limits
     system = pp.Opts(
-        max_grad=120,
+        max_grad=28,
         grad_unit='mT/m',
-        max_slew=200,
+        max_slew=150,
         slew_unit='T/m/s',
         rf_ringdown_time=20e-6,
         rf_dead_time=100e-6,
@@ -75,7 +84,7 @@ def write_gre_sequence(
         flip_angle=np.deg2rad(flip_angle_deg),
         duration=3e-3,
         slice_thickness=slice_thickness,
-        apodization=0.42,
+        apodization=0.5,
         time_bw_product=4,
         system=system,
         return_gz=True,
@@ -86,36 +95,31 @@ def write_gre_sequence(
     # Define other gradients and ADC events
     delta_kx = 1 / fov_x
     delta_ky = 1 / fov_y
-    gx = pp.make_trapezoid(channel='x', flat_area=n_x * delta_kx, flat_time=3.2e-3, system=system)
+    gx = pp.make_trapezoid(channel='x', flat_area=n_x * delta_kx, flat_time=readout_duration, system=system)
     adc = pp.make_adc(num_samples=n_x, duration=gx.flat_time, delay=gx.rise_time, system=system)
     gx_pre = pp.make_trapezoid(channel='x', area=-gx.area / 2, duration=1e-3, system=system)
     gz_reph = pp.make_trapezoid(channel='z', area=-gz.area / 2, duration=1e-3, system=system)
-    phase_areas = (np.arange(n_y) - n_y / 2) * delta_ky
+    phase_areas = -(np.arange(n_y) - n_y / 2) * delta_ky
 
     # Gradient spoiling
     gx_spoil = pp.make_trapezoid(channel='x', area=2 * n_x * delta_kx, system=system)
     gz_spoil = pp.make_trapezoid(channel='z', area=4 / slice_thickness, system=system)
 
     # Calculate timing
-    te_delay = (
-        te
-        - (pp.calc_duration(gz, rf) - pp.calc_rf_center(rf)[0] - rf.delay)
-        - pp.calc_duration(gx_pre)
-        - pp.calc_duration(gx) / 2
-        - pp.eps
-    )
+    te_delay = te - pp.calc_duration(gx_pre) - gz.fall_time - gz.flat_time / 2 - pp.calc_duration(gx) / 2
     te_delay = np.ceil(te_delay / seq.grad_raster_time) * seq.grad_raster_time
 
-    tr_delay = tr - pp.calc_duration(gz, rf) - pp.calc_duration(gx_pre) - pp.calc_duration(gx) - te_delay
+    tr_delay = tr - pp.calc_duration(gz) - pp.calc_duration(gx_pre) - pp.calc_duration(gx) - te_delay
     tr_delay = np.ceil(tr_delay / seq.grad_raster_time) * seq.grad_raster_time
-
     assert np.all(te_delay >= 0)
     assert np.all(tr_delay >= pp.calc_duration(gx_spoil, gz_spoil))
 
     rf_phase = 0
     rf_inc = 0
 
-    def add_tr(phase_area: float, acquire: bool) -> None:
+    seq.add_block(pp.make_label(label='REV', type='SET', value=1))
+
+    def add_tr(phase_area: float, acquire: bool, labels=()) -> None:
         nonlocal rf_phase, rf_inc
         rf.phase_offset = rf_phase / 180 * np.pi
         adc.phase_offset = rf_phase / 180 * np.pi
@@ -136,19 +140,31 @@ def write_gre_sequence(
         else:
             seq.add_block(gx)
         gy_pre.amplitude = -gy_pre.amplitude
-        spoil_events = [pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil]
+        spoil_labels = list(labels)
         if ideal_spoiling_reset:
-            spoil_events.append(pp.make_label(label='TRID', type='INC', value=1))
-        seq.add_block(*spoil_events)
+            spoil_labels.append(pp.make_label(label='TRID', type='INC', value=1))
+        seq.add_block(pp.make_delay(tr_delay), gx_spoil, gy_pre, gz_spoil, *spoil_labels)
 
-    for _ in range(dummy_scans):
-        add_tr(0.0, acquire=False)
+    # Loop over slices
+    for i_slice in range(n_slices):
+        rf.freq_offset = gz.amplitude * slice_thickness * (i_slice - (n_slices - 1) / 2)
 
-    # Loop over phase encodes and define sequence blocks
-    for i_phase in range(n_y):
-        add_tr(float(phase_areas[i_phase]), acquire=True)
+        for _ in range(dummy_scans):
+            add_tr(0.0, acquire=False)
+
+        # Loop over phase encodes and define sequence blocks
+        for i_phase in range(n_y):
+            if i_phase != n_y - 1:
+                labels = [pp.make_label(type='INC', label='LIN', value=1)]
+            else:
+                labels = [
+                    pp.make_label(type='SET', label='LIN', value=0),
+                    pp.make_label(type='INC', label='SLC', value=1),
+                ]
+            add_tr(float(phase_areas[i_phase]), acquire=True, labels=labels)
 
     ok, error_report = seq.check_timing()
+
     if ok:
         print('Timing check passed successfully')
     else:
@@ -159,16 +175,13 @@ def write_gre_sequence(
         print(seq.test_report())
 
     if plot:
-        seq.plot(time_range=(0.0, tr), stacked=True, show_guides=True)
+        seq.plot(label='lin', time_range=np.array([0, 32]) * tr, time_disp='ms')
 
-    seq.set_definition(key='FOV', value=[fov_x, fov_y, slice_thickness])
-    seq.set_definition(key='Name', value='gre')
+    seq.set_definition(key='FOV', value=[fov_x, fov_y, slice_thickness * n_slices])
+    seq.set_definition(key='Name', value='gre_label')
 
     if write_seq:
         seq.write(seq_filename)
 
     return seq
 
-
-if __name__ == '__main__':
-    write_gre_sequence(write_seq=True)

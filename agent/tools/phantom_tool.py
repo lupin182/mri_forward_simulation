@@ -3,11 +3,11 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 
 from agent.tools.base_tool import MRISimulationBaseTool
-from phantom.make_phantom import (
+from mri_sim.phantom import (
     generate_simple_asymmetric_phantom,
     generate_simple_ring_phantom,
     generate_simple_sphere_phantom,

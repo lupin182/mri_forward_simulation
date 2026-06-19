@@ -133,6 +133,3 @@ def write_epi_sequence(
     return seq
 
 
-if __name__ == '__main__':
-    write_epi_sequence(write_seq=True)
-

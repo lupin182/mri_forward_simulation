@@ -7,9 +7,9 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import streamlit as st
 
-import device_manager
+from mri_sim.device_manager import disable_cupy
 
-device_manager.disable_cupy()
+disable_cupy()
 
 import matplotlib
 

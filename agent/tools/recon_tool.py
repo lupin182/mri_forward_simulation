@@ -3,11 +3,11 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-import device_manager
-device_manager.disable_cupy()
+from mri_sim.device_manager import disable_cupy
+disable_cupy()
 
 from agent.tools.base_tool import MRISimulationBaseTool
-from recon import reconstruct_3d_cartesian_fft
+from mri_sim.reconstruction import reconstruct_3d_cartesian_fft
 from agent.tools.phantom_tool import get_cached_phantom
 from agent.tools.simulation_tool import get_cached_kspace, get_cached_seq
 import json

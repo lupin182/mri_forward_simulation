@@ -275,7 +275,3 @@ def write_epi_se_rs_sequence(
         seq.write(seq_filename)
 
     return seq
-
-
-if __name__ == '__main__':
-    main(plot=True, write_seq=True)

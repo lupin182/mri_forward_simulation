@@ -86,8 +86,13 @@ def write_epi_se_sequence(
 
     # Phase blip in shortest possible time
     gy_blip_duration = 2 * np.sqrt(delta_ky / system.max_slew)
-    gy_blip_duration = np.ceil(gy_blip_duration / 10e-6) * 10e-6
-    gy = pp.make_trapezoid(channel='y', system=system, area=delta_ky, duration=gy_blip_duration)
+    gy_blip_duration = np.ceil(gy_blip_duration / seq.grad_raster_time) * seq.grad_raster_time
+    while True:
+        try:
+            gy = pp.make_trapezoid(channel='y', system=system, area=delta_ky, duration=gy_blip_duration)
+            break
+        except AssertionError:
+            gy_blip_duration += seq.grad_raster_time
 
     # Refocusing pulse with spoiling gradients
     rf180 = pp.make_block_pulse(
@@ -150,6 +155,3 @@ def write_epi_se_sequence(
 
     return seq
 
-
-if __name__ == '__main__':
-    write_epi_se_sequence(write_seq=True)

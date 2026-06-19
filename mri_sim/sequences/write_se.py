@@ -223,6 +223,3 @@ def write_se_sequence(
 
     return seq
 
-
-if __name__ == '__main__':
-    write_se_sequence(plot=True, write_seq=True)

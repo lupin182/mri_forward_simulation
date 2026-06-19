@@ -1,69 +1,259 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Any
+
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import pydicom
-from phantom.make_phantom import generate_simple_sphere_phantom
-from phantom.make_phantom import Phantom, generate_simple_asymmetric_phantom, generate_multi_spin_sphere_phantom
-from Sequence.write_gre_label import write_gre_label_sequence
-from Sequence.write_epi import write_epi_sequence
-from Sequence.write_se import write_se_sequence
-from Sequence.write_epi_se import write_epi_se_sequence
-from Sequence.write_epi_label import write_epi_label_sequence
-from Sequence.write_gre import write_gre_sequence
-from simulate import SimulationConfig, simulate
-import numpy as np
-import matplotlib.pyplot as plt
-from generate_artifact import generate_rf_artifact, generate_rf_artifact_real
-import pypulseq as pp
-from recon import reconstruct_3d_cartesian_fft,reconstruct_3d_cartesian_fft_multichannel
-from phantom.make_phantom import generate_coil_sensitivity_maps,generate_diff_coil_sensitivity_maps
-from recon import sos_reconstruction
+
+from mri_sim.generate_artifact import generate_B0_inhomogeneity, generate_rf_artifact_real
+from mri_sim.phantom import (
+    Phantom,
+    generate_simple_asymmetric_phantom,
+    generate_simple_ring_phantom,
+    generate_simple_sphere_phantom,
+)
+from mri_sim.reconstruction import reconstruct_3d_cartesian_fft_multichannel, sos_reconstruction
+from mri_sim.sequences import get_sequence
+from mri_sim.simulation import SimulationConfig, simulate
+
+
+DEFAULT_OUTPUT_DIR = Path("output")
+PHANTOM_DATABASE_DIR = Path(__file__).resolve().parent / "mri_sim" / "phantom_depository"
+
+
+def _parse_csv_floats(value: str) -> list[float]:
+    if not value:
+        return []
+    return [float(item.strip()) for item in value.split(",") if item.strip()]
+
+
+def _load_database_phantom(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    phantom_dir = PHANTOM_DATABASE_DIR / name
+    required = [phantom_dir / "rho.npy", phantom_dir / "t1.npy", phantom_dir / "t2.npy"]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing phantom database files: {', '.join(missing)}")
+    return tuple(np.load(path) for path in required)  # type: ignore[return-value]
+
+
+def _build_phantom(args: argparse.Namespace) -> tuple[Phantom, np.ndarray, np.ndarray, np.ndarray]:
+    if args.phantom == "asymmetric":
+        rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=args.nz, Nx=args.nx, Ny=args.ny)
+    elif args.phantom == "sphere":
+        rho, t1, t2 = generate_simple_sphere_phantom(Nz=args.nz, Nx=args.nx, Ny=args.ny, radius=args.radius)
+    elif args.phantom == "ring":
+        rho, t1, t2 = generate_simple_ring_phantom(
+            Nz=args.nz,
+            Nx=args.nx,
+            Ny=args.ny,
+            inner_radius=args.inner_radius,
+            outer_radius=args.outer_radius,
+        )
+    elif args.phantom == "database":
+        if not args.phantom_name:
+            raise ValueError("--phantom-name is required when --phantom database is used.")
+        rho, t1, t2 = _load_database_phantom(args.phantom_name)
+    else:
+        raise ValueError(f"Unsupported phantom type: {args.phantom}")
+
+    phantom = Phantom(
+        rho,
+        t1,
+        t2,
+        fov_x=args.fov_x,
+        fov_y=args.fov_y,
+        slice_thickness=args.slice_thickness,
+    )
+    if args.b0_artifact:
+        generate_B0_inhomogeneity(
+            phantom,
+            mode=args.b0_mode,
+            delta_B0_ppm=args.b0_delta_ppm,
+            axis=args.b0_axis,
+        )
+    return phantom, rho, t1, t2
+
+
+def _build_sequence(args: argparse.Namespace, phantom: Phantom):
+    base_kwargs: dict[str, Any] = {
+        "fov": (phantom.fov_x, phantom.fov_y),
+        "n_x": phantom.Nx,
+        "n_y": phantom.Ny,
+        "slice_thickness": phantom.slice_thickness,
+    }
+    if args.sequence == "gre":
+        base_kwargs.update({"tr": args.tr, "te": args.te})
+    elif args.sequence == "gre_label":
+        base_kwargs.update({"n_slices": phantom.Nz, "tr": args.tr, "te": args.te})
+    elif args.sequence == "se":
+        base_kwargs.update({"n_slices": phantom.Nz, "tr": args.tr, "te": args.te})
+    elif args.sequence == "epi":
+        base_kwargs.update({"n_slices": phantom.Nz})
+    elif args.sequence == "epi_se":
+        base_kwargs.update({"te": args.te})
+    elif args.sequence == "epi_label":
+        base_kwargs.update({"n_slices": phantom.Nz})
+    return get_sequence(args.sequence, **base_kwargs)
+
+
+def _as_reconstruction_input(kspace: np.ndarray) -> np.ndarray:
+    signal = np.asarray(kspace)
+    if signal.ndim == 2:
+        return signal.T
+    return signal.squeeze()
+
+
+def _reconstruct(kspace: np.ndarray, k_traj_adc: np.ndarray, phantom: Phantom) -> tuple[np.ndarray, np.ndarray]:
+    coil_images, k_grid = reconstruct_3d_cartesian_fft_multichannel(
+        _as_reconstruction_input(kspace),
+        k_traj_adc,
+        Ny=phantom.Ny,
+        Nx=phantom.Nx,
+        Nz=phantom.Nz,
+    )
+    if coil_images.ndim == 4:
+        image = sos_reconstruction(coil_images)
+    else:
+        image = coil_images
+    return image, k_grid
+
+
+def _add_rf_artifact(args: argparse.Namespace, t_adc: np.ndarray, kspace: np.ndarray) -> np.ndarray:
+    freqs = _parse_csv_floats(args.rf_noise_freq)
+    amps = _parse_csv_floats(args.rf_noise_amp)
+    if len(freqs) != len(amps):
+        raise ValueError("--rf-noise-freq and --rf-noise-amp must contain the same number of values.")
+
+    signal = np.asarray(kspace).squeeze()
+    if signal.ndim == 1:
+        return generate_rf_artifact_real(
+            t_adc,
+            signal,
+            rf_noise_freq=freqs,
+            rf_noise_amp=amps,
+            bg_noise_amp=args.bg_noise_amp,
+        )
+
+    artifact_channels = [
+        generate_rf_artifact_real(
+            t_adc,
+            signal[:, coil_idx],
+            rf_noise_freq=freqs,
+            rf_noise_amp=amps,
+            bg_noise_amp=args.bg_noise_amp,
+        )
+        for coil_idx in range(signal.shape[1])
+    ]
+    return np.stack(artifact_channels, axis=1)
+
+
+def _save_png(path: Path, image: np.ndarray, reference: np.ndarray, title: str) -> None:
+    image_2d = np.abs(np.squeeze(image)[0] if image.ndim == 3 else np.squeeze(image))
+    reference_2d = np.abs(np.squeeze(reference)[0] if reference.ndim == 3 else np.squeeze(reference))
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].set_title(title)
+    axes[0].imshow(image_2d, cmap="gray")
+    axes[0].axis("off")
+    axes[1].set_title("Phantom Rho")
+    axes[1].imshow(reference_2d, cmap="gray")
+    axes[1].axis("off")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    if args.seed is not None:
+        np.random.seed(args.seed)
+
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    phantom, rho, _, _ = _build_phantom(args)
+    sequence = _build_sequence(args, phantom)
+
+    kspace = simulate(phantom, sequence, SimulationConfig(fine_dt=args.fine_dt))
+    k_traj_adc, _, _, _, _ = sequence.calculate_kspace()
+    image, _ = _reconstruct(kspace, k_traj_adc, phantom)
+
+    np.save(output_dir / "kspace.npy", kspace)
+    np.save(output_dir / "reconstruction.npy", image)
+    np.save(output_dir / "reconstruction_magnitude.npy", np.abs(image))
+    if not args.no_plot:
+        _save_png(output_dir / "reconstruction.png", image, rho[0, 0], "Reconstruction")
+
+    summary: dict[str, Any] = {
+        "phantom": args.phantom,
+        "phantom_name": args.phantom_name,
+        "sequence": args.sequence,
+        "shape": {"nz": phantom.Nz, "nx": phantom.Nx, "ny": phantom.Ny},
+        "kspace_shape": list(np.asarray(kspace).shape),
+        "reconstruction_shape": list(np.asarray(image).shape),
+        "output_dir": str(output_dir.resolve()),
+        "rf_artifact": False,
+        "b0_artifact": bool(args.b0_artifact),
+    }
+
+    if args.rf_artifact:
+        _, _, _, t_adc, _ = sequence.waveforms_and_times()
+        artifact_kspace = _add_rf_artifact(args, np.asarray(t_adc), np.asarray(kspace))
+        artifact_image, _ = _reconstruct(artifact_kspace, k_traj_adc, phantom)
+        np.save(output_dir / "kspace_rf_artifact.npy", artifact_kspace)
+        np.save(output_dir / "reconstruction_rf_artifact.npy", artifact_image)
+        np.save(output_dir / "reconstruction_rf_artifact_magnitude.npy", np.abs(artifact_image))
+        if not args.no_plot:
+            _save_png(output_dir / "reconstruction_rf_artifact.png", artifact_image, rho[0, 0], "RF Artifact")
+        summary["rf_artifact"] = True
+        summary["artifact_kspace_shape"] = list(np.asarray(artifact_kspace).shape)
+        summary["artifact_reconstruction_shape"] = list(np.asarray(artifact_image).shape)
+
+    with (output_dir / "summary.json").open("w", encoding="utf-8") as fp:
+        json.dump(summary, fp, indent=2, ensure_ascii=False)
+    return summary
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run the MRI forward simulation pipeline without a UI.")
+    parser.add_argument("--phantom", choices=["asymmetric", "sphere", "ring", "database"], default="asymmetric")
+    parser.add_argument("--phantom-name", default=None)
+    parser.add_argument("--sequence", choices=["gre", "gre_label", "se", "epi", "epi_se", "epi_label"], default="gre_label")
+    parser.add_argument("--nx", type=int, default=64)
+    parser.add_argument("--ny", type=int, default=64)
+    parser.add_argument("--nz", type=int, default=1)
+    parser.add_argument("--fov-x", type=float, default=0.256)
+    parser.add_argument("--fov-y", type=float, default=0.256)
+    parser.add_argument("--slice-thickness", type=float, default=0.004)
+    parser.add_argument("--tr", type=float, default=0.1)
+    parser.add_argument("--te", type=float, default=0.02)
+    parser.add_argument("--fine-dt", type=float, default=1e-5)
+    parser.add_argument("--radius", type=int, default=16)
+    parser.add_argument("--inner-radius", type=int, default=10)
+    parser.add_argument("--outer-radius", type=int, default=20)
+    parser.add_argument("--rf-artifact", action="store_true")
+    parser.add_argument("--rf-noise-freq", default="127700000.0")
+    parser.add_argument("--rf-noise-amp", default="5.0")
+    parser.add_argument("--bg-noise-amp", type=float, default=1.0)
+    parser.add_argument("--b0-artifact", action="store_true")
+    parser.add_argument("--b0-mode", choices=["linear", "parabolic"], default="linear")
+    parser.add_argument("--b0-delta-ppm", type=float, default=0.5)
+    parser.add_argument("--b0-axis", choices=["x", "y"], default="x")
+    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--no-plot", action="store_true")
+    return parser
+
+
 def main() -> None:
+    args = build_parser().parse_args()
+    summary = run_pipeline(args)
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
 
-    #rho, t1, t2, dWRnd = generate_multi_spin_sphere_phantom(Nz=1, Nx=64, Ny=64, radius=16, Nspins=32)
-    rho, t1, t2 = generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64)
-    FOV_x =  0.256#dx*Nx # 单位：米
-    FOV_y =  0.256#dy*Ny # 单位：米
 
-    phantom = Phantom(rho, t1, t2, fov_x=FOV_x, fov_y=FOV_y, slice_thickness=0.004)
-    #phantom.rxCoilmg, phantom.rxCoilpe, phantom.RxCoilNum = generate_diff_coil_sensitivity_maps(phantom.Nx, phantom.Ny, phantom.Nz, n_coils=4)
-
-    #phantom.dWRnd = dWRnd
-    # The current forward model uses one isochromat per voxel, so RF spoiling
-    # creates stronger artifacts than a scanner would. Disable it for the demo.
-
-    seq = pp.Sequence()
-    seq.read('epi_se_pypulseq.seq')
-    #seq=write_gre_sequence(ideal_spoiling_reset=True)
-    k_space_signal = simulate(phantom, seq, SimulationConfig(fine_dt=1e-5))
-    k_traj_adc, _, _, _, _ = seq.calculate_kspace()
-    _, _, _, t_adc, _ = seq.waveforms_and_times()
-
-    k_space_signal = k_space_signal.squeeze()
-
-    img_nonnoise, _ =  reconstruct_3d_cartesian_fft_multichannel(k_space_signal.T, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
-
-    k_space_signal = generate_rf_artifact_real(t_adc, k_space_signal, rf_noise_freq=[127.7e6], rf_noise_amp=[5.0], bg_noise_amp=1.0)
-
-    
-
-    image_recon,_ = reconstruct_3d_cartesian_fft_multichannel(k_space_signal.T, k_traj_adc, Ny=phantom.Ny, Nx=phantom.Nx, Nz=phantom.Nz)
-
-    image_recon = sos_reconstruction(image_recon)
-
-    #plot_color_overlay(image_recon[0], rho[0,0,0])
-    #np.save('image_recon.npy', image_recon)
-    plt.figure(figsize=(10, 10))
-    plt.subplot(121)
-    plt.title("Reconstruction with RF artifact")
-    plt.imshow(np.abs(image_recon), cmap='gray')
-    plt.axis('off')
-
-    plt.subplot(122)
-    plt.title("Reconstruction without RF artifact")
-    plt.imshow(np.abs(img_nonnoise[0]),  cmap='gray')
-    plt.axis('off')
-
-    plt.show()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
