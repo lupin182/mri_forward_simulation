@@ -7,10 +7,10 @@
 #### 面向 PyPulseq/Bloch 方程的磁共振成像前向模拟、伪影建模与智能代理工作台
 
 <p align="left">
-	<a href="LICENSE"><img src="https://img.shields.io/github/license/lupin182/mri_simulation?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=00ADD8" alt="license"></a>
-	<img src="https://img.shields.io/github/last-commit/lupin182/mri_simulation?style=for-the-badge&logo=git&logoColor=white&color=00ADD8" alt="last-commit">
-	<img src="https://img.shields.io/github/languages/top/lupin182/mri_simulation?style=for-the-badge&color=00ADD8" alt="repo-top-language">
-	<img src="https://img.shields.io/github/languages/count/lupin182/mri_simulation?style=for-the-badge&color=00ADD8" alt="repo-language-count">
+	<a href="LICENSE"><img src="https://img.shields.io/github/license/lupin182/mri_forward_simulation?style=for-the-badge&logo=opensourceinitiative&logoColor=white&color=00ADD8" alt="license"></a>
+	<img src="https://img.shields.io/github/last-commit/lupin182/mri_forward_simulation?style=for-the-badge&logo=git&logoColor=white&color=00ADD8" alt="last-commit">
+	<img src="https://img.shields.io/github/languages/top/lupin182/mri_forward_simulation?style=for-the-badge&color=00ADD8" alt="repo-top-language">
+	<img src="https://img.shields.io/github/languages/count/lupin182/mri_forward_simulation?style=for-the-badge&color=00ADD8" alt="repo-language-count">
 </p>
 <p align="left">
 		<em>_Built with:_</em>
@@ -444,8 +444,8 @@ python main.py simulate --sequence gre_label --phantom asymmetric --nx 8 --ny 8 
 <summary>贡献者图谱</summary>
 <br>
 <p align="left">
-   <a href="https://github.com/lupin182/mri_simulation/graphs/contributors">
-      <img src="https://contrib.rocks/image?repo=lupin182/mri_simulation">
+   <a href="https://github.com/lupin182/mri_forward_simulation/graphs/contributors">
+      <img src="https://contrib.rocks/image?repo=lupin182/mri_forward_simulation">
    </a>
 </p>
 </details>
