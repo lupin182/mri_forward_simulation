@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+from time import perf_counter
 from typing import Literal
 from tqdm import tqdm
 import numpy as np
 import pypulseq as pp
 from .bloch_kernel import TWO_PI, apply_bloch_step, build_off_resonance_rad_s
 from .phantom import Phantom
-from .device_manager import get_xp
+from .device_manager import device_manager, get_xp
 from .utils import (
     build_time_grid,
     get_adc_sample_times,
@@ -225,7 +227,7 @@ def _simulate_fine_block(
     gamma_hz: float,
     system_b0_t: float,
     config: SimulationConfig,
-) -> tuple[list[complex], int]:
+) -> tuple[list[xp.ndarray], int]:
     """Numerically integrate a block using a refined time grid.
     
     使用CuPy加速此计算，当GPU可用时。这是最计算密集的函数之一，
@@ -233,7 +235,7 @@ def _simulate_fine_block(
     """
     time_grid = build_time_grid(block, config.fine_dt)
     adc_sample_times = get_adc_sample_times(getattr(block, "adc", None))
-    adc_samples: list[complex] = []
+    adc_samples: list[xp.ndarray] = []
     adc_cursor = 0
     num_steps = max(0, len(time_grid) - 1)
 
@@ -329,6 +331,7 @@ def simulate(
     config: SimulationConfig | None = None,
     *,
     return_details: bool = False,
+    progress_callback: Callable[[int, int, float], None] | None = None,
 ):
     """Run the forward simulation using block-wise routing.
 
@@ -347,10 +350,14 @@ def simulate(
     system_b0_t = float(getattr(sequence.system, "B0", 3.0))
 
     summaries = analyze_sequence_blocks(sequence)
-    collected_signal: list[complex] = []
+    collected_signal: list[xp.ndarray] = []
     previous_excitation_freq_hz: float | None = None
 
-    for summary in tqdm(summaries):
+    total_blocks = len(summaries)
+    iterator = summaries if progress_callback is not None else tqdm(summaries, ascii=" #", dynamic_ncols=True)
+    progress_start = perf_counter()
+
+    for block_counter, summary in enumerate(iterator, start=1):
         block = sequence.get_block(summary.index)
         _maybe_reset_transverse_for_ideal_spoiling(
             phantom_state,
@@ -371,8 +378,14 @@ def simulate(
         else:
             _apply_fast_block(phantom_state, block, gamma_hz)
             summary.num_steps = 1 if summary.duration > 0 else 0
+        if progress_callback is not None:
+            progress_callback(block_counter, total_blocks, perf_counter() - progress_start)
 
-    signal = np.asarray(collected_signal, dtype=np.complex128)
+    if collected_signal:
+        signal_device = xp.stack(collected_signal).astype(xp.complex128, copy=False)
+        signal = np.asarray(device_manager.to_numpy(signal_device), dtype=np.complex128)
+    else:
+        signal = np.empty((0,), dtype=np.complex128)
     if return_details:
         adc_times, _ = sequence.adc_times()
         return SimulationResult(signal=signal, adc_times=adc_times, block_summaries=summaries)

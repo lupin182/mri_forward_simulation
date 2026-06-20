@@ -6,6 +6,7 @@ import queue
 import subprocess
 import sys
 import threading
+import codecs
 from pathlib import Path
 from tkinter import filedialog, messagebox
 import tkinter as tk
@@ -35,6 +36,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 MAIN_PATH = ROOT_DIR / "main.py"
 OUTPUT_DIR = ROOT_DIR / "output"
 ENV_PATH = ROOT_DIR / ".env"
+PROGRESS_PREFIX = "__MRI_PROGRESS__ "
 
 PHANTOMS = ("asymmetric", "sphere", "ring", "database")
 SEQUENCES = ("gre", "gre_label", "se", "tse", "epi", "epi_se", "epi_label", "database")
@@ -96,6 +98,7 @@ class MriGuiApp(tk.Tk):
         self.output_queue: queue.Queue[tuple[str, str | dict]] = queue.Queue()
         self.worker: threading.Thread | None = None
         self.process: subprocess.Popen | None = None
+        self.process_output_buffer = ""
         self.current_summary: dict | None = None
 
         self.sim_vars: dict[str, tk.Variable] = {}
@@ -214,6 +217,8 @@ class MriGuiApp(tk.Tk):
         self._entry(controls, row, 0, "fine dt", "fine_dt", "1e-5")
         self._entry(controls, row, 2, "seed", "seed", "")
         row += 1
+        self._combo(controls, row, "CuPy mode", "cupy_mode", ("auto", "disabled"), "auto", None)
+        row += 1
         self._entry(controls, row, 0, "output dir", "output_dir", str(OUTPUT_DIR))
         ttk.Button(controls, text="Browse", command=self.choose_output_dir).grid(row=row, column=2, sticky="ew", padx=4, pady=3)
         row += 1
@@ -232,6 +237,13 @@ class MriGuiApp(tk.Tk):
 
         self.log_text = tk.Text(right, height=10, wrap="word")
         self.log_text.pack(fill="x", padx=8, pady=(0, 8))
+        progress_frame = ttk.Frame(right)
+        progress_frame.pack(fill="x", padx=8, pady=(0, 8))
+        self.progress_var = tk.DoubleVar(value=0.0)
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100.0)
+        self.progress_bar.pack(side="left", fill="x", expand=True)
+        self.progress_label = ttk.Label(progress_frame, text="0/0 | 0.0% | 0.00 it/s", width=28)
+        self.progress_label.pack(side="right", padx=(8, 0))
         self.figure_frame = ttk.Frame(right)
         self.figure_frame.pack(fill="both", expand=True, padx=8, pady=8)
         self.sim_canvas: FigureCanvasTkAgg | None = None
@@ -425,6 +437,9 @@ class MriGuiApp(tk.Tk):
             return
 
         self.log_text.delete("1.0", "end")
+        self.process_output_buffer = ""
+        self.progress_var.set(0.0)
+        self.progress_label.configure(text="0/0 | 0.0% | 0.00 it/s")
         self.status_var.set("Running simulation...")
         self.run_button.configure(state="disabled")
         self.cancel_button.configure(state="normal")
@@ -438,20 +453,30 @@ class MriGuiApp(tk.Tk):
 
     def _run_subprocess(self, command: list[str]) -> None:
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         try:
             self.process = subprocess.Popen(
                 command,
                 cwd=ROOT_DIR,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                env=env,
                 creationflags=creationflags,
             )
             assert self.process.stdout is not None
-            for line in self.process.stdout:
-                self.output_queue.put(("log", line))
+            decoder = codecs.getincrementaldecoder("utf-8")("replace")
+            while True:
+                chunk = self.process.stdout.read(1024)
+                if not chunk:
+                    break
+                text = decoder.decode(chunk)
+                if text:
+                    self.output_queue.put(("log", text))
+            remainder = decoder.decode(b"", final=True)
+            if remainder:
+                self.output_queue.put(("log", remainder))
             return_code = self.process.wait()
             if return_code == 0:
                 self.output_queue.put(("done", {"status": "success", "output_dir": self.sim_vars["output_dir"].get()}))
@@ -467,19 +492,57 @@ class MriGuiApp(tk.Tk):
             while True:
                 kind, payload = self.output_queue.get_nowait()
                 if kind == "log":
-                    self.log_text.insert("end", str(payload))
-                    self.log_text.see("end")
+                    self._handle_process_output(str(payload))
                 elif kind == "done":
+                    self._flush_process_output_buffer()
                     self._handle_simulation_done(payload if isinstance(payload, dict) else {})
         except queue.Empty:
             pass
         self.after(200, self._poll_queue)
+
+    def _handle_process_output(self, text: str) -> None:
+        self.process_output_buffer += text.replace("\r", "\n")
+        while "\n" in self.process_output_buffer:
+            line, self.process_output_buffer = self.process_output_buffer.split("\n", 1)
+            content = line.rstrip("\r")
+            if content.startswith(PROGRESS_PREFIX):
+                self._update_progress_from_line(content)
+            elif content:
+                self._append_log(f"{content}\n")
+
+    def _flush_process_output_buffer(self) -> None:
+        content = self.process_output_buffer.strip("\r\n")
+        self.process_output_buffer = ""
+        if not content:
+            return
+        if content.startswith(PROGRESS_PREFIX):
+            self._update_progress_from_line(content)
+        else:
+            self._append_log(f"{content}\n")
+
+    def _update_progress_from_line(self, line: str) -> None:
+        try:
+            payload = json.loads(line[len(PROGRESS_PREFIX):])
+            current = int(payload.get("current", 0))
+            total = int(payload.get("total", 0))
+            percent = float(payload.get("percent", 0.0))
+            rate = float(payload.get("rate", 0.0))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            self._append_log(f"{line}\n")
+            return
+        self.progress_var.set(max(0.0, min(100.0, percent)))
+        self.progress_label.configure(text=f"{current}/{total} | {percent:.1f}% | {rate:.2f} it/s")
+
+    def _append_log(self, text: str) -> None:
+        self.log_text.insert("end", text)
+        self.log_text.see("end")
 
     def _handle_simulation_done(self, payload: dict) -> None:
         self.run_button.configure(state="normal")
         self.cancel_button.configure(state="disabled")
         if payload.get("status") == "success":
             self.status_var.set("Simulation completed.")
+            self.progress_var.set(100.0)
             summary_path = Path(str(payload["output_dir"])) / "summary.json"
             if summary_path.exists():
                 self.load_result_summary(summary_path, target="simulation")
@@ -488,7 +551,7 @@ class MriGuiApp(tk.Tk):
             self.status_var.set(f"Simulation failed or cancelled: {payload}")
 
     def _build_simulation_command(self) -> list[str]:
-        args = [sys.executable, str(MAIN_PATH), "simulate"]
+        args = [sys.executable, "-u", str(MAIN_PATH), "simulate"]
         self._append_choice(args, "--phantom", "phantom")
         if self.sim_vars["phantom"].get() == "database":
             self._append_required(args, "--phantom-name", "phantom_name")
@@ -549,6 +612,8 @@ class MriGuiApp(tk.Tk):
             args.append("--rf-artifact")
         if bool(self.sim_vars["b0_artifact"].get()):
             args.append("--b0-artifact")
+        args.extend(["--cupy-mode", str(self.sim_vars["cupy_mode"].get())])
+        args.append("--progress-json")
         return args
 
     def _append_choice(self, args: list[str], option: str, key: str) -> None:
@@ -723,19 +788,28 @@ class MriGuiApp(tk.Tk):
             old_canvas.get_tk_widget().destroy()
 
         fig = Figure(figsize=(9, 6), dpi=100)
-        axes = fig.subplots(1, 3)
         comparison_png = output_dir / "reconstruction.png"
-        if comparison_png.exists():
-            self._plot_image_file(axes[0], comparison_png, "Reconstruction / Phantom")
+
+        if target == "simulation":
+            ax = fig.subplots(1, 1)
+            if comparison_png.exists():
+                self._plot_image_file(ax, comparison_png, "Reconstruction / Phantom")
+            else:
+                self._plot_array_file(ax, output_dir / "reconstruction_magnitude.npy", "Reconstruction")
         else:
-            self._plot_array_file(axes[0], output_dir / "reconstruction_magnitude.npy", "Reconstruction")
-        self._plot_kspace(axes[1], output_dir / "kspace.npy")
-        artifact_path = output_dir / "reconstruction_rf_artifact_magnitude.npy"
-        if artifact_path.exists():
-            self._plot_array_file(axes[2], artifact_path, "RF Artifact")
-        else:
-            axes[2].axis("off")
-            axes[2].set_title("No RF artifact")
+            axes = fig.subplots(1, 3)
+            if comparison_png.exists():
+                self._plot_image_file(axes[0], comparison_png, "Reconstruction / Phantom")
+            else:
+                self._plot_array_file(axes[0], output_dir / "reconstruction_magnitude.npy", "Reconstruction")
+            self._plot_kspace(axes[1], output_dir / "kspace.npy")
+            artifact_path = output_dir / "reconstruction_rf_artifact_magnitude.npy"
+            if artifact_path.exists():
+                self._plot_array_file(axes[2], artifact_path, "RF Artifact")
+            else:
+                axes[2].axis("off")
+                axes[2].set_title("No RF artifact")
+
         fig.tight_layout()
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()

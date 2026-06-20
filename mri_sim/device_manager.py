@@ -6,6 +6,7 @@
 """
 
 import importlib
+import os
 from typing import Any, Callable, Optional
 
 
@@ -28,6 +29,15 @@ class DeviceManager:
     
     def _initialize(self):
         """初始化设备管理器，检测CuPy可用性"""
+        mode = os.environ.get("MRI_SIM_CUPY_MODE", "auto").strip().lower()
+        if mode == "disabled":
+            import numpy as np
+            self._xp = np
+            self._cupy_available = False
+            self._use_cupy = False
+            print("CuPy已禁用，使用NumPy进行CPU计算")
+            return
+
         try:
             # 尝试导入CuPy
             import cupy as cp

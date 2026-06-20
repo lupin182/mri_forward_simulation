@@ -65,6 +65,16 @@ python main.py simulate --sequence gre_label --phantom asymmetric --nx 64 --ny 6
 
 输出目录默认是 `output/`，包含 `kspace.npy`、`reconstruction.npy`、`reconstruction_magnitude.npy`、`summary.json` 和可选 PNG。
 
+CuPy 设备模式可以用 `--cupy-mode` 控制：
+
+```powershell
+python main.py simulate --cupy-mode auto
+python main.py simulate --cupy-mode disabled
+```
+
+- `auto`：默认模式；可用 GPU 时使用 CuPy，否则回退 NumPy/CPU。
+- `disabled`：强制使用 NumPy/CPU，适合规避显存不足、CuPy 兼容性问题或调试。
+
 ## 本地桌面 GUI
 
 除智能代理外的主要功能也可以通过本地窗口界面使用：
@@ -82,6 +92,7 @@ GUI 使用 Python 内置 Tkinter，不需要额外安装 Qt。界面包含：
 - `Results`：查看当前运行结果和 `output/` 中已有历史结果。
 
 模拟在后台子进程中运行，运行期间窗口不会卡死；`Cancel` 会终止当前模拟进程。
+`Simulation` 页中的 `CuPy mode` 可选择 `auto` 或 `disabled`，含义与 CLI 的 `--cupy-mode` 一致。
 
 ## 体模参数与序列参数
 

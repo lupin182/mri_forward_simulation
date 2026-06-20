@@ -2,10 +2,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def _configure_cupy_mode_from_argv(argv: list[str]) -> None:
+    if not argv or argv[0] != "simulate":
+        return
+    for index, item in enumerate(argv[1:], start=1):
+        if item == "--cupy-mode" and index + 1 < len(argv):
+            os.environ["MRI_SIM_CUPY_MODE"] = argv[index + 1]
+            return
+        if item.startswith("--cupy-mode="):
+            os.environ["MRI_SIM_CUPY_MODE"] = item.split("=", 1)[1]
+            return
+
+
+_configure_cupy_mode_from_argv(sys.argv[1:])
 
 import matplotlib
 matplotlib.use("Agg")
@@ -42,6 +58,7 @@ DEFAULT_OUTPUT_DIR = Path("output")
 DEFAULT_FOV_X = 0.256
 DEFAULT_FOV_Y = 0.256
 DEFAULT_SLICE_THICKNESS = 0.004
+PROGRESS_PREFIX = "__MRI_PROGRESS__ "
 SEQUENCE_SPECIFIC_ARGUMENTS = {
     "seq_tr",
     "seq_te",
@@ -375,7 +392,25 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     phantom, rho, _, _ = _build_phantom(args)
     sequence, sequence_geometry = _build_sequence(args, phantom)
 
-    kspace = simulate(phantom, sequence, SimulationConfig(fine_dt=args.fine_dt))
+    progress_callback = None
+    if getattr(args, "progress_json", False):
+        def progress_callback(current: int, total: int, elapsed_s: float) -> None:
+            rate = current / elapsed_s if elapsed_s > 0 else 0.0
+            payload = {
+                "current": current,
+                "total": total,
+                "percent": (current / total * 100.0) if total else 100.0,
+                "rate": rate,
+                "elapsed_s": elapsed_s,
+            }
+            print(f"{PROGRESS_PREFIX}{json.dumps(payload, ensure_ascii=False)}", flush=True)
+
+    kspace = simulate(
+        phantom,
+        sequence,
+        SimulationConfig(fine_dt=args.fine_dt),
+        progress_callback=progress_callback,
+    )
     k_traj_adc, _, _, _, _ = sequence.calculate_kspace()
     image, _ = _reconstruct(
         kspace,
@@ -412,6 +447,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "output_dir": str(output_dir.resolve()),
         "rf_artifact": False,
         "b0_artifact": bool(args.b0_artifact),
+        "cupy_mode": args.cupy_mode,
     }
 
     if args.rf_artifact:
@@ -493,6 +529,8 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-plot", action="store_true")
+    parser.add_argument("--cupy-mode", choices=["auto", "disabled"], default="auto")
+    parser.add_argument("--progress-json", action="store_true", help=argparse.SUPPRESS)
     return parser
 
 
