@@ -113,6 +113,7 @@ python main.py simulate --phantom asymmetric --nx 128 --ny 128 --sequence gre_la
 | `epi` | 基础 EPI 序列，无 ramp sampling。 |
 | `epi_se` | 单层 spin-echo EPI 序列。 |
 | `epi_label` | 带 label、navigator、repetition 控制的 EPI 序列。 |
+| `database` | 从本地序列数据库读取已导入的 `.seq` 文件，矩阵和重建维度由 CLI 几何参数控制。 |
 
 ## 序列参数
 
@@ -191,6 +192,68 @@ EPI label：
 ```powershell
 python main.py simulate --sequence epi_label --seq-n-reps 2 --seq-n-navigator 3
 ```
+
+数据库序列：
+
+```powershell
+python main.py simulate --sequence database --sequence-name my_gre --phantom asymmetric --nx 64 --ny 64
+```
+
+## 序列数据库
+
+序列数据库用于管理已经生成好的 PyPulseq `.seq` 文件。数据库根目录：
+
+```text
+mri_sim/seq_depository/
+```
+
+目录结构：
+
+```text
+mri_sim/seq_depository/
+├── info.txt
+└── <sequence_name>/
+    └── <sequence_name>.seq
+```
+
+索引格式：
+
+```text
+name:description
+```
+
+每个序列条目是一个目录，目录内只要求存在同名 `.seq` 文件。导入时会先用 PyPulseq 读取源文件；如果读取失败，不会写入数据库。同名导入表示更新：覆盖 `<sequence_name>/<sequence_name>.seq`，并更新 `info.txt` 中的描述。
+
+建议在 `load` 时把重要序列参数写入 `--description`，例如矩阵大小、FOV、层数、TR、TE、序列类型等，便于后续列出数据库序列时快速确认该 `.seq` 文件的采集配置。
+
+管理命令只在 `simulate sequence-database` 下提供：
+
+```powershell
+python main.py simulate sequence-database list
+python main.py simulate sequence-database load --name my_gre --description "Imported GRE sequence" --file-path E:\data\my_gre.seq
+python main.py simulate sequence-database delete --name my_gre
+```
+
+使用数据库序列参与模拟：
+
+```powershell
+python main.py simulate --sequence database --sequence-name my_gre --phantom asymmetric --nx 64 --ny 64
+```
+
+数据库序列不会自动推断重建矩阵。默认使用体模几何；如果需要让体模网格和序列采样矩阵不同，显式传入：
+
+```powershell
+python main.py simulate --sequence database --sequence-name my_gre --nx 128 --ny 128 --seq-nx 64 --seq-ny 64 --seq-n-slices 1
+```
+
+`database` 序列只接受通用序列几何参数：
+
+```text
+--seq-nx --seq-ny --seq-n-slices
+--seq-fov-x --seq-fov-y --seq-slice-thickness
+```
+
+它不接受内置序列的专属参数，例如 `--seq-n-reps`、`--seq-flip-angle-deg`、`--seq-n-echo`。如果显式传入这些参数，程序会报错。
 
 ## 体模数据库
 

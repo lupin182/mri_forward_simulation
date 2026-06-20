@@ -20,6 +20,8 @@ tmp/
 temp/
 *.log
 *.seq
+mri_sim/seq_depository/*
+!mri_sim/seq_depository/.gitkeep
 
 # Local editor and agent workspace state
 .vscode/

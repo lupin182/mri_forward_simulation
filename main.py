@@ -29,6 +29,12 @@ from mri_sim.phantom_database import (
 )
 from mri_sim.reconstruction import reconstruct_3d_cartesian_fft_multichannel, sos_reconstruction
 from mri_sim.sequences import get_sequence
+from mri_sim.sequence_database import (
+    delete_sequence_database_entry,
+    list_sequence_database,
+    load_sequence_database_file,
+    load_sequence_from_database,
+)
 from mri_sim.simulation import SimulationConfig, simulate
 
 
@@ -87,6 +93,7 @@ SEQUENCE_SUPPORTED_ARGUMENTS = {
     "epi": set(),
     "epi_se": {"seq_te"},
     "epi_label": {"seq_n_reps", "seq_n_navigator"},
+    "database": set(),
 }
 SEQUENCE_OPTION_DESTS = {
     "--seq-n-slices": "seq_n_slices",
@@ -174,6 +181,17 @@ def _explicit_args(args: argparse.Namespace) -> set[str]:
 
 
 def _effective_sequence_geometry(args: argparse.Namespace, phantom: Phantom) -> dict[str, int | float]:
+    if args.sequence == "database":
+        return {
+            "nx": int(args.seq_nx if args.seq_nx is not None else phantom.Nx),
+            "ny": int(args.seq_ny if args.seq_ny is not None else phantom.Ny),
+            "n_slices": int(args.seq_n_slices if args.seq_n_slices is not None else phantom.Nz),
+            "fov_x": float(args.seq_fov_x if args.seq_fov_x is not None else phantom.fov_x),
+            "fov_y": float(args.seq_fov_y if args.seq_fov_y is not None else phantom.fov_y),
+            "slice_thickness": float(
+                args.seq_slice_thickness if args.seq_slice_thickness is not None else phantom.slice_thickness
+            ),
+        }
     if "seq_n_slices" in _explicit_args(args) and args.sequence not in SEQUENCE_N_SLICES_SUPPORTED:
         raise ValueError(f"{args.sequence} does not support sequence argument(s): --seq-n-slices")
     n_slices = args.seq_n_slices if args.seq_n_slices is not None else phantom.Nz
@@ -207,6 +225,11 @@ def _add_if_explicit(kwargs: dict[str, Any], args: argparse.Namespace, attr: str
 def _build_sequence(args: argparse.Namespace, phantom: Phantom):
     _validate_sequence_specific_args(args)
     seq_geometry = _effective_sequence_geometry(args, phantom)
+    if args.sequence == "database":
+        if not args.sequence_name:
+            raise ValueError("--sequence-name is required when --sequence database is used.")
+        return load_sequence_from_database(args.sequence_name), seq_geometry
+
     base_kwargs: dict[str, Any] = {
         "fov": (seq_geometry["fov_x"], seq_geometry["fov_y"]),
         "n_x": seq_geometry["nx"],
@@ -419,7 +442,12 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the MRI forward simulation pipeline without a UI.")
     parser.add_argument("--phantom", choices=["asymmetric", "sphere", "ring", "database"], default="asymmetric")
     parser.add_argument("--phantom-name", default=None)
-    parser.add_argument("--sequence", choices=["gre", "gre_label", "se", "tse", "epi", "epi_se", "epi_label"], default="gre_label")
+    parser.add_argument(
+        "--sequence",
+        choices=["gre", "gre_label", "se", "tse", "epi", "epi_se", "epi_label", "database"],
+        default="gre_label",
+    )
+    parser.add_argument("--sequence-name", default=None)
     parser.add_argument("--nx", type=int, default=64)
     parser.add_argument("--ny", type=int, default=64)
     parser.add_argument("--nz", type=int, default=1)
@@ -504,6 +532,22 @@ def build_database_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_sequence_database_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Manage the local MRI sequence database.")
+    subparsers = parser.add_subparsers(dest="sequence_database_command", required=True)
+
+    subparsers.add_parser("list", help="List available database sequences.")
+
+    load_parser = subparsers.add_parser("load", help="Import a .seq file into the sequence database.")
+    load_parser.add_argument("--name", required=True, help="Sequence name and target directory name.")
+    load_parser.add_argument("--description", required=True, help="Description written to seq_depository/info.txt.")
+    load_parser.add_argument("--file-path", required=True, help="Source .seq file to copy into the sequence database.")
+
+    delete_parser = subparsers.add_parser("delete", help="Delete an entire database sequence entry.")
+    delete_parser.add_argument("--name", required=True, help="Target sequence name.")
+    return parser
+
+
 def run_database_command(args: argparse.Namespace) -> dict[str, Any]:
     if args.database_command == "list":
         return {"status": "success", "phantoms": list_phantom_database()}
@@ -520,6 +564,18 @@ def run_database_command(args: argparse.Namespace) -> dict[str, Any]:
             result = delete_phantom_database_data(args.name, args.data)
         return {"status": "success", **result}
     raise ValueError(f"Unsupported database command: {args.database_command}")
+
+
+def run_sequence_database_command(args: argparse.Namespace) -> dict[str, Any]:
+    if args.sequence_database_command == "list":
+        return {"status": "success", "sequences": list_sequence_database()}
+    if args.sequence_database_command == "load":
+        result = load_sequence_database_file(args.name, args.description, args.file_path)
+        return {"status": "success", **result}
+    if args.sequence_database_command == "delete":
+        result = delete_sequence_database_entry(args.name)
+        return {"status": "success", **result}
+    raise ValueError(f"Unsupported sequence database command: {args.sequence_database_command}")
 
 
 def build_root_parser() -> argparse.ArgumentParser:
@@ -555,7 +611,20 @@ def main(argv: list[str] | None = None) -> None:
     if argv and argv[0] == "simulate":
         if len(argv) > 1 and argv[1] == "database":
             args = build_database_parser().parse_args(argv[2:])
-            result = run_database_command(args)
+            try:
+                result = run_database_command(args)
+            except (ValueError, FileNotFoundError, AssertionError, OSError, RuntimeError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                sys.exit(1)
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            return
+        if len(argv) > 1 and argv[1] == "sequence-database":
+            args = build_sequence_database_parser().parse_args(argv[2:])
+            try:
+                result = run_sequence_database_command(args)
+            except (ValueError, FileNotFoundError, AssertionError, OSError, RuntimeError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                sys.exit(1)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return
         args = parse_simulation_args(argv[1:])
