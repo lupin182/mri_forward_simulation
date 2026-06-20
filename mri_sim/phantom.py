@@ -5,48 +5,50 @@ xp = get_xp()
 
 def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
     """
-    鐢熸垚涓€涓崟鍒囩墖闈炲绉颁綋妯★紝鐢ㄤ簬楠岃瘉鏂瑰悜鍜屽潗鏍囩郴,杩欓噷浣撴ā鏁版嵁鏄鏁ｇ殑,涓旂畝鍖栦负姣忎釜浣撶礌鍗曠被鍨嬪崟spin_packet
-    1. 涓績鏈変竴涓ぇ鍦?鍦嗘煴 (瀵嗗害 1.0)
-    2. 鏈変竴涓皬鏂瑰潡/鍦嗙偣 (瀵嗗害 2.0) -> 鐢ㄤ簬瀹氭柟鍚?
-    3. 鑳屾櫙鏈夊井寮变俊鍙?(瀵嗗害 0.1)
+    生成一个单层非对称体模，用于验证方向和坐标系。
+    体模数据是离散的，并简化为每个体素只有单类型、单 spin packet。
 
-    杩斿洖:
-    Rho: (type, spin_packet, Nz, Nx, Ny) 瀵嗗害
-    T1:  (type, spin_packet, Nz, Nx, Ny) T1鍊?
-    T2:  (type, spin_packet, Nz, Nx, Ny) T2鍊?
+    1. 中心有一个大圆柱区域，密度为 1.0。
+    2. 右上角有一个小方块标记，密度为 2.0，用于判断方向。
+    3. 背景保留弱信号，密度为 0.1。
+
+    返回:
+    Rho: (type, spin_packet, Nz, Nx, Ny) 质子密度
+    T1:  (type, spin_packet, Nz, Nx, Ny) T1 值
+    T2:  (type, spin_packet, Nz, Nx, Ny) T2 值
     """
     
-    # 1. 鍒濆鍖?(鑳屾櫙瀵嗗害 0.1, T1=2s, T2=0.5s)
+    # 1. 初始化背景：密度 0.1，T1=2s，T2=0.005s。
     rho = np.ones((Nz, Nx, Ny)) * 0.1
     t1 = np.ones((Nz, Nx, Ny)) * 2.0
     t2 = np.ones((Nz, Nx, Ny)) * 0.005
 
 
-    # 2. 鐢熸垚鍧愭爣缃戞牸 (娉ㄦ剰杩欓噷涓轰簡鐢熸垚鏁版嵁锛屾垜浠弗鏍兼寜鐓?Nz, Nx, Ny 椤哄簭)
-    # 杩欓噷鐨?x_idx 瀵瑰簲 Nx 缁村害锛寉_idx 瀵瑰簲 Ny 缁村害
+    # 2. 生成坐标网格，严格匹配 (Nz, Nx, Ny) 顺序。
+    # 这里的 x 对应 Nx 维度，y 对应 Ny 维度。
     _, x, y = np.meshgrid(
         np.arange(Nz), 
-        np.arange(Nx) - Nx/2,  # 灞呬腑鍧愭爣: -32 鍒?+32
+        np.arange(Nx) - Nx/2,  # 居中坐标。
         np.arange(Ny) - Ny/2, 
         indexing='ij'
     )
 
-    # 3. 涓讳綋锛氫腑蹇冨ぇ鍦?(鍗婂緞 16)
+    # 3. 主体：中心大圆，半径 16。
     # x^2 + y^2 < r^2
     mask_main = (x**2 + y**2) <= 16**2
     
-    # 4. 鏍囪鐗╋細鍙充笂瑙掑皬鐐?(鍗槦)
-    # 鏀惧湪 X 姝ｅ崐杞? Y 姝ｅ崐杞?(渚嬪 x=15, y=15 澶?
-    # 杩欐槸涓€涓?6x6 鐨勫皬鏂瑰潡
+    # 4. 标记物：右上角小方块。
+    # 放在 X 正半轴、Y 正半轴，用于辅助判断方向。
+    # 这是一个 6x6 左右的小方块。
     mask_marker = (x > 10) & (x < 20) & (y > 10) & (y < 20)
 
-    # 5. 璧嬪€?
-    # 涓讳綋锛氭按 (Rho=1.0, T1=1.0, T2=0.1)
+    # 5. 赋值。
+    # 主体：类似水的区域，Rho=1.0，T1=1.0，T2=0.1。
     rho[mask_main] = 1.0
     t1[mask_main]  = 1.0
     t2[mask_main]  = 0.1
 
-    # 鏍囪鐗╋細楂樹寒娌圭偣 (Rho=2.0, T1=0.5, T2=0.05 - 鐭璗1鏇翠寒(鍦ㄧ煭TR涓?, 鐭璗2)
+    # 标记物：高亮点，Rho=2.0，T1=0.5，T2=0.05。
     rho[mask_marker] = 2.0 
     t1[mask_marker]  = 0.5 
     t2[mask_marker]  = 0.05
@@ -59,27 +61,28 @@ def generate_simple_asymmetric_phantom(Nz=1, Nx=64, Ny=64):
 
 def generate_simple_ring_phantom(Nz=1, Nx=64, Ny=64, inner_radius=10, outer_radius=20):
     """
-    鐢熸垚涓€涓腑蹇冧负鍦嗙幆/鍦嗙幆鏌辩殑浣撴ā鏁版嵁,杩欓噷浣撴ā鏁版嵁鏄鏁ｇ殑,涓旂畝鍖栦负姣忎釜浣撶礌鍗曠被鍨嬪崟spin_packet
+    生成一个中心为圆环或圆环柱的体模数据。
+    体模数据是离散的，并简化为每个体素只有单类型、单 spin packet。
     
-    鍙傛暟:
-        inner_radius: 鍐呭渾鍗婂緞 (鍍忕礌)
-        outer_radius: 澶栧渾鍗婂緞 (鍍忕礌)
+    参数:
+        inner_radius: 内圆半径，单位为像素。
+        outer_radius: 外圆半径，单位为像素。
         
-    杩斿洖:
-        Rho: (type, spin_packet, Nz, Nx, Ny) 瀵嗗害, 鍦嗙幆=1.0, 鑳屾櫙=0.1
-        T1:  (type, spin_packet, Nz, Nx, Ny) T1鍊?
-        T2:  (type, spin_packet, Nz, Nx, Ny) T2鍊?
+    返回:
+        Rho: (type, spin_packet, Nz, Nx, Ny) 质子密度，圆环=1.0，背景=0.1。
+        T1:  (type, spin_packet, Nz, Nx, Ny) T1 值。
+        T2:  (type, spin_packet, Nz, Nx, Ny) T2 值。
     """
     
-    # 1. 鍒濆鍖栬儗鏅?(Nz, Nx, Ny)
-    # 鑳屾櫙瀵嗗害 0.1
+    # 1. 初始化背景 (Nz, Nx, Ny)。
+    # 背景密度 0.1。
     rho = np.ones((Nz, Nx, Ny)) * 0.1
-    # 鑳屾櫙寮涜鲍鏃堕棿 (妯℃嫙娴佷綋鎴栭暱寮涜鲍缁勭粐)
+    # 背景弛豫时间，模拟流体或长弛豫组织。
     t1 = np.ones((Nz, Nx, Ny)) * 2.0  # 2000ms
     t2 = np.ones((Nz, Nx, Ny)) * 0.5  # 500ms
 
-    # 2. 鐢熸垚鍧愭爣缃戞牸
-    # 浣跨敤 indexing='ij' 涓ユ牸鍖归厤 (Nz, Nx, Ny) 鐨勭煩闃靛舰鐘?
+    # 2. 生成坐标网格。
+    # 使用 indexing='ij' 严格匹配 (Nz, Nx, Ny) 的矩阵形状。
     _, x_idx, y_idx = np.meshgrid(
         np.arange(Nz), 
         np.arange(Nx), 
@@ -87,22 +90,22 @@ def generate_simple_ring_phantom(Nz=1, Nx=64, Ny=64, inner_radius=10, outer_radi
         indexing='ij'
     )
 
-    # 3. 瀹氫箟涓績鐐?
+    # 3. 定义中心点。
     cx, cy = Nx // 2, Ny // 2
 
-    # 4. 璁＄畻璺濈骞虫柟 (鍦?Nx-Ny 骞抽潰涓?
-    # 蹇界暐 Z 杞磋窛绂?(鍋囪鏄渾鏌辩姸/2D鍦嗙幆)
+    # 4. 在 Nx-Ny 平面计算距离平方。
+    # 忽略 Z 轴距离，等价于圆柱状或 2D 圆环。
     dist_sq = (x_idx - cx)**2 + (y_idx - cy)**2
 
-    # 5. 鐢熸垚鍦嗙幆鎺╄啘 (Mask)
-    # 閫昏緫锛氳窛绂?>= 鍐呭崐寰勫钩鏂? 涓? 璺濈 <= 澶栧崐寰勫钩鏂?
+    # 5. 生成圆环掩膜。
+    # 逻辑：距离平方位于内半径平方和外半径平方之间。
     ring_mask = (dist_sq >= inner_radius**2) & (dist_sq <= outer_radius**2)
 
-    # 6. 璧嬪€?(鍦嗙幆閮ㄥ垎)
-    # 妯℃嫙绫讳技姘寸殑鎬ц川 (楂樹俊鍙凤紝闀縏1/T2)
-    rho[ring_mask] = 1.0    # 瀵嗗害 1
+    # 6. 给圆环区域赋值。
+    # 模拟类似水的性质：高信号、较长 T1/T2。
+    rho[ring_mask] = 1.0    # 密度 1。
     t1[ring_mask]  = 1.0    # T1 1000ms
-    t2[ring_mask]  = 0.1    # T2 100ms (绋嶅井鐭竴鐐癸紝妯℃嫙缁勭粐)
+    t2[ring_mask]  = 0.1    # T2 100ms，略短一些以模拟组织。
 
     rho = rho[np.newaxis,np.newaxis,:,:,:]
     t1 = t1[np.newaxis,np.newaxis,:,:,:]
@@ -112,23 +115,24 @@ def generate_simple_ring_phantom(Nz=1, Nx=64, Ny=64, inner_radius=10, outer_radi
 
 def generate_simple_sphere_phantom(Nz=1, Nx=64, Ny=64, radius=16):
     """
-    鐢熸垚涓€涓腑蹇冩湁鐞冧綋锛堟垨鍦嗙洏锛夌殑浣撴ā鏁版嵁,杩欓噷浣撴ā鏁版嵁鏄鏁ｇ殑,涓旂畝鍖栦负姣忎釜浣撶礌鍗曠被鍨嬪崟spin_packet
+    生成一个中心有球体或圆盘的体模数据。
+    体模数据是离散的，并简化为每个体素只有单类型、单 spin packet。
     
-    杩斿洖:
-        Rho: (type, spin_packet, Nz, Nx, Ny) 瀵嗗害, 鐞?1.0, 鑳屾櫙=0.1
-        T1:  (type, spin_packet, Nz, Nx, Ny) T1鍊? 鐞?1.0s (1000ms), 鑳屾櫙=2.0s
-        T2:  (type, spin_packet, Nz, Nx, Ny) T2鍊? 鐞?0.1s (100ms),  鑳屾櫙=0.5s
+    返回:
+        Rho: (type, spin_packet, Nz, Nx, Ny) 质子密度，球体=1.0，背景=1e-7。
+        T1:  (type, spin_packet, Nz, Nx, Ny) T1 值，球体=1.0s，背景=2.0s。
+        T2:  (type, spin_packet, Nz, Nx, Ny) T2 值，球体=0.1s，背景=0.5s。
     """
     
-    # 1. 鍒濆鍖栬儗鏅?(Nz, Nx, Ny)
-    # 鑳屾櫙瀵嗗害 0.1
+    # 1. 初始化背景 (Nz, Nx, Ny)。
+    # 背景密度接近 0。
     rho = np.ones((Nz, Nx, Ny)) * 1e-7
-    # 鑳屾櫙 T1 = 2000ms, T2 = 500ms (妯℃嫙绫讳技鑴戣剨娑叉垨姘磋偪鐨勯暱寮涜鲍鑳屾櫙锛屾柟渚垮姣?
+    # 背景 T1 = 2000ms，T2 = 500ms，模拟长弛豫背景。
     t1 = np.ones((Nz, Nx, Ny)) * 2.0
     t2 = np.ones((Nz, Nx, Ny)) * 0.5
 
-    # 2. 鐢熸垚鍧愭爣缃戞牸
-    # 娉ㄦ剰杩欓噷浣跨敤 indexing='ij' 浠ュ尮閰嶇煩闃电储寮曚範鎯?
+    # 2. 生成坐标网格。
+    # 使用 indexing='ij' 以匹配矩阵索引习惯。
     z, x, y = np.meshgrid(
         np.arange(Nz), 
         np.arange(Nx), 
@@ -136,19 +140,19 @@ def generate_simple_sphere_phantom(Nz=1, Nx=64, Ny=64, radius=16):
         indexing='ij'
     )
 
-    # 3. 瀹氫箟鐞冨績鍧愭爣
+    # 3. 定义球心坐标。
     cz, cx, cy = Nz // 2, Nx // 2, Ny // 2
 
-    # 4. 璁＄畻璺濈骞虫柟 (Distance Squared)
-    # 濡傛灉 Nz=1锛寊鏂瑰悜鐨勮窛绂讳篃灏辨槸0锛岄€€鍖栦负2D鍦?
+    # 4. 计算距离平方。
+    # 如果 Nz=1，Z 方向距离为 0，退化为 2D 圆盘。
     dist_sq = (x - cx)**2 + (y - cy)**2 + (z - cz)**2
 
-    # 5. 鐢熸垚鐞冧綋鎺╄啘 (Mask)
+    # 5. 生成球体掩膜。
     mask = dist_sq <= radius**2
 
-    # 6. 璧嬪€?(鐞冧綋閮ㄥ垎)
-    rho[mask] = 1.0   # 瀵嗗害 1
-    t1[mask]  = 1.0   # T1 1000ms (鍏稿瀷姘?鑴戝疄璐?
+    # 6. 给球体区域赋值。
+    rho[mask] = 1.0   # 密度 1。
+    t1[mask]  = 1.0   # T1 1000ms。
     t2[mask]  = 0.1   # T2 100ms
 
     rho = rho[np.newaxis,np.newaxis,:,:,:]
@@ -160,50 +164,50 @@ def generate_simple_sphere_phantom(Nz=1, Nx=64, Ny=64, radius=16):
 
 def generate_multi_spin_sphere_phantom(Nz=1, Nx=64, Ny=64, radius=16, Nspins=15):
     """
-    鐢熸垚銆愬崟灞傚鑷棆鍖呫€戠悆浣撲綋妯★紝涓撶敤浜嶨RE搴忓垪鎵扮浉姊害浠跨湡瀹為獙
-    姣忎釜浣撶礌鍖呭惈Nspins涓嫭绔嬭嚜鏃嬪寘锛屾柊澧瀌WRnd妯℃嫙T2*鏁堝簲
+    生成单层多自旋包球体体模，用于 GRE 序列扰相梯度仿真实验。
+    每个体素包含 Nspins 个独立自旋包，并通过 dWRnd 模拟 T2* 效应。
     
-    鍙傛暟锛?
-        Nz=1: 鍗曞眰锛?D浠跨湡锛?
-        Nx,Ny: 鐭╅樀灏哄
-        radius: 鐞冧綋鍗婂緞
-        Nspins: 鍗曚釜浣撶礌鍐呯殑鑷棆鍖呮暟閲?
-    杩斿洖锛?
-        Rho:    (1, Nspins, Nz, Nx, Ny) 璐ㄥ瓙瀵嗗害
-        T1:     (1, Nspins, Nz, Nx, Ny) T1寮涜鲍鏃堕棿 (s)
-        T2:     (1, Nspins, Nz, Nx, Ny) T2寮涜鲍鏃堕棿 (s)
-        dWRnd:  (1, Nspins, Nz, Nx, Ny) 闅忔満灞€閮ㄧ鍦哄亸绉伙紝鍗曚綅锛歳ad/s锛屾ā鎷烼2*鏁堝簲
+    参数:
+        Nz=1: 单层 2D 仿真。
+        Nx, Ny: 矩阵尺寸。
+        radius: 球体半径。
+        Nspins: 单个体素内的自旋包数量。
+    返回:
+        Rho:    (1, Nspins, Nz, Nx, Ny) 质子密度。
+        T1:     (1, Nspins, Nz, Nx, Ny) T1 弛豫时间，单位秒。
+        T2:     (1, Nspins, Nz, Nx, Ny) T2 弛豫时间，单位秒。
+        dWRnd:  (1, Nspins, Nz, Nx, Ny) 随机局部磁场偏移，单位 rad/s，用于模拟 T2* 效应。
     """
-    # 1. 鍩虹浣撴ā锛堢悆浣?鑳屾櫙锛?
+    # 1. 基础体模：球体和背景。
     rho_base = np.ones((Nz, Nx, Ny)) * 1e-7
     t1_base = np.ones((Nz, Nx, Ny)) * 2.0
     t2_base = np.ones((Nz, Nx, Ny)) * 0.5
 
-    # 鍧愭爣缃戞牸
+    # 坐标网格。
     z, x, y = np.meshgrid(np.arange(Nz), np.arange(Nx), np.arange(Ny), indexing='ij')
     cz, cx, cy = Nz // 2, Nx // 2, Ny // 2
     dist_sq = (x - cx)**2 + (y - cy)**2 + (z - cz)**2
     mask = dist_sq <= radius**2
 
-    # 鐞冧綋鍖哄煙璧嬪€?
+    # 给球体区域赋值。
     rho_base[mask] = 1.0
     t1_base[mask] = 1.0
     t2_base[mask] = 0.1
 
-    # 2. 鎵╁睍涓哄鑷棆鍖呯淮搴︼紙褰㈢姸缁熶竴锛?, Nspins, Nz, Nx, Ny锛?
+    # 2. 扩展为多自旋包维度，形状统一为 (1, Nspins, Nz, Nx, Ny)。
     rho = np.tile(rho_base[np.newaxis, np.newaxis, :, :, :], (1, Nspins, 1, 1, 1))
     T1  = np.tile(t1_base[np.newaxis, np.newaxis, :, :, :],  (1, Nspins, 1, 1, 1))
     T2  = np.tile(t2_base[np.newaxis, np.newaxis, :, :, :],  (1, Nspins, 1, 1, 1))
 
-    # 3. 鐢熸垚 dWRnd 鉁?涓ユ牸婊¤冻鎵€鏈夎姹?
-    # 鍗曚綅锛歳ad/s
-    # 鍒嗗竷锛氭鎬佸垎甯冿紝鍧囧€?锛堟棤鍋忥級锛屽皬鏍囧噯宸紙鐪熷疄鐗╃悊閲忕骇锛?
-    # 姣忎釜鑷棆鍖?浣撶礌鐨勫亸绉婚兘鐙珛涓嶅悓
-    # 褰㈢姸锛氫笌 Rho/T1/T2 瀹屽叏涓€鑷?
+    # 3. 生成 dWRnd，严格满足形状要求。
+    # 单位：rad/s。
+    # 分布：正态分布，均值 0，较小标准差。
+    # 每个自旋包和体素的偏移都相互独立。
+    # 形状与 Rho/T1/T2 完全一致。
     dWRnd = np.random.normal(
-        loc=0.0,        # 鏃犲亸锛堝潎鍊间负0锛?
-        scale=35.0,      # 灏忛殢鏈烘暟锛宺ad/s 鍗曚綅锛圱2*浠跨湡鏍囧噯閲忕骇锛?
-        size=rho.shape  # 褰㈢姸瀹屽叏鍖归厤
+        loc=0.0,        # 无偏，均值为 0。
+        scale=35.0,      # 小随机数，单位 rad/s，作为 T2* 仿真的标准量级。
+        size=rho.shape  # 形状完全匹配。
     )
 
     return rho, T1, T2, dWRnd
@@ -213,35 +217,35 @@ def generate_coil_sensitivity_maps(
     Nx=64, 
     Ny=64, 
     Nz=1, 
-    n_coils=8,      # 绾垮湀閫氶亾鏁?
-    sigma=0.8       # 楂樻柉骞虫粦搴?
+    n_coils=8,      # 线圈通道数。
+    sigma=0.8       # 高斯平滑度。
 ):
     """
-    鐢熸垚MRI澶氶€氶亾鎺ユ敹绾垮湀鐏垫晱搴﹀浘
-    鉁?鍒嗙杈撳嚭锛氬箙鍊肩伒鏁忓害 + 鐩镐綅鐏垫晱搴?
-    鉁?鐗╃悊姝ｇ‘锛氱幆褰㈠垎甯冮珮鏂箙搴?+ 骞虫粦闅忔満鐩镐綅
-    鉁?缁村害鏍囧噯锛?n_coils, Nz, Nx, Ny)
+    生成 MRI 多通道接收线圈灵敏度图。
+    输出拆分为幅值灵敏度和相位灵敏度。
+    幅值采用环形分布的高斯模型，相位采用平滑随机相位。
+    输出维度为 (n_coils, Nz, Nx, Ny)。
     
-    鍙傛暟锛?
-        Nx, Ny: 鍥惧儚鐭╅樀灏哄
-        Nz: 灞傛暟锛堥粯璁?锛?D浠跨湡锛?
-        n_coils: 绾垮湀閫氶亾鏁?
-        sigma: 鐏垫晱搴﹀钩婊戝害
+    参数:
+        Nx, Ny: 图像矩阵尺寸。
+        Nz: 层数，默认用于 2D 仿真。
+        n_coils: 线圈通道数。
+        sigma: 灵敏度平滑度。
     
-    杩斿洖锛?
-        coil_mag:   骞呭€肩伒鏁忓害鍥撅紝float32锛屽舰鐘?(n_coils, Nz, Nx, Ny)
-        coil_phase: 鐩镐綅鐏垫晱搴﹀浘锛宖loat32锛屽舰鐘?(n_coils, Nz, Nx, Ny)锛屽崟浣嶏細寮у害(rad)
+    返回:
+        coil_mag:   幅值灵敏度图，float32，形状为 (n_coils, Nz, Nx, Ny)。
+        coil_phase: 相位灵敏度图，float32，形状为 (n_coils, Nz, Nx, Ny)，单位为弧度。
     """
-    # 1. 褰掍竴鍖栧潗鏍囩綉鏍?[-1, 1]
+    # 1. 归一化坐标网格 [-1, 1]。
     x = np.linspace(-1, 1, Nx)
     y = np.linspace(-1, 1, Ny)
     X, Y = np.meshgrid(x, y, indexing='ij')
 
-    # 鍒濆鍖栧箙鍊煎拰鐩镐綅鏁扮粍
+    # 初始化幅值和相位数组。
     coil_mag = np.zeros((n_coils, Nz, Nx, Ny), dtype=np.float32)
     coil_phase = np.zeros((n_coils, Nz, Nx, Ny), dtype=np.float32)
 
-    # 2. 绾垮湀浣嶇疆锛氱幆褰㈠潎鍖€鍒嗗竷
+    # 2. 线圈位置：环形均匀分布。
     coil_positions = []
     for c in range(n_coils):
         angle = 2 * np.pi * c / n_coils
@@ -249,17 +253,17 @@ def generate_coil_sensitivity_maps(
         cy = 0.85 * np.sin(angle)
         coil_positions.append((cx, cy))
 
-    # 3. 閫愪竴鐢熸垚姣忎釜绾垮湀鐨勫箙鍊?& 鐩镐綅
+    # 3. 逐一生成每个线圈的幅值和相位。
     for c in range(n_coils):
         cx, cy = coil_positions[c]
         
-        # 骞呭€硷細2D楂樻柉鍒嗗竷
+        # 幅值：2D 高斯分布。
         amp = np.exp(-((X - cx)** 2 + (Y - cy)** 2) / (2 * sigma** 2))
         
-        # 鐩镐綅锛氬钩婊戦殢鏈虹浉浣嶏紙鏃犻珮棰戝櫔澹帮級
+        # 相位：平滑随机相位，避免高频噪声。
         phase = np.random.uniform(0, 2*np.pi) + 0.2 * (X + Y)
         
-        # 璧嬪€煎埌瀵瑰簲缁村害
+        # 赋值到对应维度。
         coil_mag[c, 0, :, :] = amp
         coil_phase[c, 0, :, :] = phase
 
@@ -270,17 +274,15 @@ def generate_diff_coil_sensitivity_maps(
     Nx=64, 
     Ny=64, 
     Nz=1, 
-    n_coils=8,      # 绾垮湀閫氶亾鏁?
-    sigma=0.6       # 楂樻柉骞虫粦搴?
+    n_coils=8,      # 线圈通道数。
+    sigma=0.6       # 高斯平滑度。
 ):
     """
-    銆愰珮搴︾湡瀹炵増銆戝甫绌洪棿浣嶇疆宸紓鐨凪RI澶氶€氶亾鎺ユ敹绾垮湀鐏垫晱搴?
-    鉁?姣忎釜绾垮湀浣嶄簬涓嶅悓绌洪棿浣嶇疆锛氬乏涓?宸︿笅/鍙充笂/鍙充笅/宸?鍙?涓?涓?
-    鉁?闈犺繎绾垮湀鐨勫尯鍩熺伒鏁忓害鏄捐憲鏇撮珮锛堝畬鍏ㄧ鍚堢湡瀹炵墿鐞嗭級
-    鉁?鍒嗙杈撳嚭骞呭€?+ 鐩镐綅
-    鉁?缁村害锛?n_coils, Nz, Nx, Ny)
+    生成带空间位置差异的 MRI 多通道接收线圈灵敏度图。
+    每个线圈位于不同空间位置，靠近线圈的区域灵敏度更高。
+    输出拆分为幅值和相位，维度为 (n_coils, Nz, Nx, Ny)。
     """
-    # 褰掍竴鍖栧潗鏍?[-1, 1]
+    # 归一化坐标网格 [-1, 1]。
     x = np.linspace(-1, 1, Nx)
     y = np.linspace(-1, 1, Ny)
     X, Y = np.meshgrid(x, y, indexing='ij')
@@ -288,31 +290,30 @@ def generate_diff_coil_sensitivity_maps(
     coil_mag = np.zeros((n_coils, Nz, Nx, Ny), dtype=np.float32)
     coil_phase = np.zeros((n_coils, Nz, Nx, Ny), dtype=np.float32)
 
-    # ====================== 鏍稿績淇敼 ======================
-    # 8 涓嚎鍦堢湡瀹炲垎甯冨湪 FOV 涓嶅悓浣嶇疆锛屽悇鑷湁涓撳睘楂樼伒鏁忓尯
-    # 浣嶇疆鏍煎紡锛?cx, cy)锛岃秺澶ц秺闈犺繎瀵瑰簲杈圭紭
+    # 8 个线圈分布在 FOV 的不同位置，各自拥有专属高灵敏度区域。
+    # 位置格式为 (cx, cy)，绝对值越大越靠近对应边缘。
     coil_positions = [
-        (-0.75,  0.75),  # 0: 宸︿笂绾垮湀 鈫?宸︿笂鏈€鐏垫晱
-        (-0.75, -0.75),  # 1: 宸︿笅绾垮湀 鈫?宸︿笅鏈€鐏垫晱
-        ( 0.75,  0.75),  # 2: 鍙充笂绾垮湀 鈫?鍙充笂鏈€鐏垫晱
-        ( 0.75, -0.75),  # 3: 鍙充笅绾垮湀 鈫?鍙充笅鏈€鐏垫晱
-        (-0.85,  0.0),   # 4: 宸︿晶绾垮湀 鈫?宸﹁竟鏈€鐏垫晱
-        ( 0.85,  0.0),   # 5: 鍙充晶绾垮湀 鈫?鍙宠竟鏈€鐏垫晱
-        ( 0.0,  0.85),   # 6: 涓婇儴绾垮湀 鈫?涓婅竟鏈€鐏垫晱
-        ( 0.0, -0.85),   # 7: 涓嬮儴绾垮湀 鈫?涓嬭竟鏈€鐏垫晱
+        (-0.75,  0.75),  # 0: 左上线圈，左上区域最灵敏。
+        (-0.75, -0.75),  # 1: 左下线圈，左下区域最灵敏。
+        ( 0.75,  0.75),  # 2: 右上线圈，右上区域最灵敏。
+        ( 0.75, -0.75),  # 3: 右下线圈，右下区域最灵敏。
+        (-0.85,  0.0),   # 4: 左侧线圈，左边区域最灵敏。
+        ( 0.85,  0.0),   # 5: 右侧线圈，右边区域最灵敏。
+        ( 0.0,  0.85),   # 6: 上部线圈，上边区域最灵敏。
+        ( 0.0, -0.85),   # 7: 下部线圈，下边区域最灵敏。
     ]
 
-    # 鑻ラ€氶亾鏁颁笉鏄?锛岃嚜鍔ㄦ埅鏂垨寰幆鍙栦綅缃?
+    # 如果通道数不是 8，自动截断位置列表。
     coil_positions = coil_positions[:n_coils]
 
-    # ====================== 涓烘瘡涓嚎鍦堢敓鎴愮伒鏁忓害 ======================
+    # 为每个线圈生成灵敏度。
     for c in range(n_coils):
         cx, cy = coil_positions[c]
         
-        # 楂樻柉骞呭害锛氫腑蹇冨湪 (cx,cy)锛岃秺闈犺繎杩欓噷鏁板€艰秺澶?
+        # 高斯幅值：中心在 (cx, cy)，越靠近该位置数值越大。
         amp = np.exp(-((X - cx)** 2 + (Y - cy)** 2) / (2 * sigma** 2))
         
-        # 骞虫粦鐩镐綅锛堜繚鎸佺墿鐞嗙湡瀹烇級
+        # 平滑相位，保持物理上较平滑的空间变化。
         global_phase = np.random.uniform(0, 2 * np.pi)
         phase = global_phase + 0.15 * X + 0.15 * Y
         
@@ -323,23 +324,24 @@ def generate_diff_coil_sensitivity_maps(
 
 def load_simple_phantom(phantom_path, slice_num:int=None):
     """
-    杞藉叆宸叉湁鐨勪綋妯℃暟鎹?杩欓噷浣撴ā鏁版嵁鏄鏁ｇ殑,涓旂畝鍖栦负姣忎釜浣撶礌鍗曠被鍨嬪崟spin_packet
+    载入已有的体模数据。
+    这里体模数据是离散的，并简化为每个体素只有单类型、单 spin packet。
     
-    杩斿洖:
-        Rho: (type, spin_packet, Nz, Nx, Ny) 瀵嗗害
-        T1:  (type, spin_packet, Nz, Nx, Ny) T1鍊?
-        T2:  (type, spin_packet, Nz, Nx, Ny) T2鍊?
+    返回:
+        Rho: (type, spin_packet, Nz, Nx, Ny) 质子密度。
+        T1:  (type, spin_packet, Nz, Nx, Ny) T1 值。
+        T2:  (type, spin_packet, Nz, Nx, Ny) T2 值。
     """
     phantom = nib.load(phantom_path)
     data = phantom.get_fdata()
-    if slice_num is None: # 濡傛灉娌℃湁鎸囧畾鍒囩墖锛岃繑鍥炴墍鏈夊垏鐗?
+    if slice_num is None: # 如果没有指定切片，返回所有切片。
         rho = data[:,:,:,0].transpose(2,0,1)
         t1 = data[:,:,:,1].transpose(2,0,1)
         t2 = data[:,:,:,2].transpose(2,0,1)
         rho = rho[np.newaxis,np.newaxis,:,:,:]
         t1 = t1[np.newaxis,np.newaxis,:,:,:]
         t2 = t2[np.newaxis,np.newaxis,:,:,:]
-    else: # 濡傛灉鎸囧畾鍒囩墖锛岃繑鍥炴寚瀹氬垏鐗?
+    else: # 如果指定切片，返回指定切片。
         rho = data[:,:,slice_num,0]
         t1 = data[:,:,slice_num,1]
         t2 = data[:,:,slice_num,2]
@@ -354,10 +356,10 @@ class Phantom:
                 slice_thickness:float=1.0,fov_y:float=1.0,
                 RxCoilNum=1,TxCoilNum=1,B0:float=3.0,dB0:np.ndarray=None,
                 txCoilmg:np.ndarray=None,rxCoilmg:np.ndarray=None,
-                txCoilpe:np.ndarray=None,rxCoilpe:np.ndarray=None,
+        txCoilpe:np.ndarray=None,rxCoilpe:np.ndarray=None,
                 CS:np.ndarray=None,dWRnd:np.ndarray=None):
         """
-        浣撴ā绫伙紝鏀寔CuPy GPU鍔犻€熴€?
+        体模类，支持通过当前设备后端进行 CPU/GPU 计算。
         """
         self.fov_x = fov_x
         self.fov_y = fov_y
@@ -370,7 +372,7 @@ class Phantom:
         if len(t2.shape) == 3:
             t2 = t2[np.newaxis,np.newaxis,:,:,:]
 
-        # 灏嗘暟鎹Щ鍔ㄥ埌褰撳墠璁惧锛圕PU/GPU锛?
+        # 将数据移动到当前设备（CPU/GPU）。
         self.rho = device_manager.to_device(rho)
         self.t1 = device_manager.to_device(t1)
         self.t2 = device_manager.to_device(t2)
@@ -392,24 +394,24 @@ class Phantom:
         assert self.rho.shape == self.t2.shape, "rho shape must be t2 shape"
         assert len(self.rho.shape) == 5, "input rho shape must be (TypeNum, SpinNum, Nz, Nx, Ny) or (Nz, Nx, Ny)"
 
-        self.SpinNum = self.rho.shape[1]     # 鑷棆鏁?
-        self.TypeNum = self.rho.shape[0]     # 绫诲瀷鏁?
-        self.RxCoilNum = RxCoilNum     # 鎺ユ敹绾垮湀鏁?
-        self.TxCoilNum = TxCoilNum     # 鍙戝皠绾垮湀鏁?
+        self.SpinNum = self.rho.shape[1]     # 自旋包数量。
+        self.TypeNum = self.rho.shape[0]     # 组织类型数量。
+        self.RxCoilNum = RxCoilNum     # 接收线圈数量。
+        self.TxCoilNum = TxCoilNum     # 发射线圈数量。
 
 
-        # 楂樼骇鐜灞炴€ч粯璁ゅ€?
-        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilmg is None else device_manager.to_device(txCoilmg)    # 鍙戝皠鍦烘晱鎰熷害
-        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilpe is None else device_manager.to_device(txCoilpe)    # 鍙戝皠鍦烘晱鎰熷害
-        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilmg is None else device_manager.to_device(rxCoilmg)    # 鎺ユ敹鍦烘晱鎰熷害
-        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilpe is None else device_manager.to_device(rxCoilpe)    # 鎺ユ敹鍦烘晱鎰熷害
+        # 高级环境属性默认值。
+        self.txCoilmg = device_manager.to_device(xp.ones((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilmg is None else device_manager.to_device(txCoilmg)    # 发射场灵敏度幅值。
+        self.txCoilpe = device_manager.to_device(xp.zeros((TxCoilNum,self.Nz,self.Nx,self.Ny))) if txCoilpe is None else device_manager.to_device(txCoilpe)    # 发射场灵敏度相位。
+        self.rxCoilmg = device_manager.to_device(xp.ones((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilmg is None else device_manager.to_device(rxCoilmg)    # 接收场灵敏度幅值。
+        self.rxCoilpe = device_manager.to_device(xp.zeros((RxCoilNum,self.Nz,self.Nx,self.Ny))) if rxCoilpe is None else device_manager.to_device(rxCoilpe)    # 接收场灵敏度相位。
         
         assert self.txCoilmg.shape == (TxCoilNum, self.Nz, self.Nx, self.Ny), "txCoilmg shape must be (TxCoilNum, self.Nz, self.Nx, self.Ny)"
         assert self.txCoilpe.shape == (TxCoilNum, self.Nz, self.Nx, self.Ny), "txCoilpe shape must be (TxCoilNum, self.Nz, self.Nx, self.Ny)"
         assert self.rxCoilmg.shape == (RxCoilNum, self.Nz, self.Nx, self.Ny), "rxCoilmg shape must be (RxCoilNum, self.Nz, self.Nx, self.Ny)"
         assert self.rxCoilpe.shape == (RxCoilNum, self.Nz, self.Nx, self.Ny), "rxCoilpe shape must be (RxCoilNum, self.Nz, self.Nx, self.Ny)"
 
-        # 闅忔椂闂存紨鍖栫殑鐘舵€?(鍒濆鍖栧钩琛℃€?
+        # 随时间演化的磁化状态，初始化为平衡状态。
         self.Mx = device_manager.to_device(xp.zeros_like(self.rho))       
         self.My = device_manager.to_device(xp.zeros_like(self.rho))
         self.Mz = device_manager.to_device(xp.copy(self.rho * self.B0))
