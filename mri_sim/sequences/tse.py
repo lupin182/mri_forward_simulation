@@ -5,7 +5,7 @@ import numpy as np
 import pypulseq as pp
 
 
-def main(
+def write_tse_sequence(
     fov: float | tuple[float, float] = 256e-3,
     n_x: int = 64,
     n_y: int = 64,

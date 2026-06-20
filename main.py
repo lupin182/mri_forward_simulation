@@ -52,6 +52,8 @@ SEQUENCE_SPECIFIC_ARGUMENTS = {
     "seq_prephase_duration",
     "seq_n_reps",
     "seq_n_navigator",
+    "seq_n_echo",
+    "seq_rf_flip_deg",
 }
 SEQUENCE_SUPPORTED_ARGUMENTS = {
     "gre": {
@@ -81,6 +83,7 @@ SEQUENCE_SUPPORTED_ARGUMENTS = {
         "seq_readout_time",
         "seq_prephase_duration",
     },
+    "tse": {"seq_tr", "seq_te", "seq_n_echo", "seq_rf_flip_deg"},
     "epi": set(),
     "epi_se": {"seq_te"},
     "epi_label": {"seq_n_reps", "seq_n_navigator"},
@@ -103,8 +106,10 @@ SEQUENCE_OPTION_DESTS = {
     "--seq-prephase-duration": "seq_prephase_duration",
     "--seq-n-reps": "seq_n_reps",
     "--seq-n-navigator": "seq_n_navigator",
+    "--seq-n-echo": "seq_n_echo",
+    "--seq-rf-flip-deg": "seq_rf_flip_deg",
 }
-SEQUENCE_N_SLICES_SUPPORTED = {"gre_label", "se", "epi", "epi_label"}
+SEQUENCE_N_SLICES_SUPPORTED = {"gre_label", "se", "tse", "epi", "epi_label"}
 
 
 def _parse_csv_floats(value: str) -> list[float]:
@@ -229,6 +234,10 @@ def _build_sequence(args: argparse.Namespace, phantom: Phantom):
         _add_if_explicit(base_kwargs, args, "seq_rf_refocusing_duration", "rf_refocusing_duration")
         _add_if_explicit(base_kwargs, args, "seq_readout_time", "readout_time")
         _add_if_explicit(base_kwargs, args, "seq_prephase_duration", "prephase_duration")
+    elif args.sequence == "tse":
+        base_kwargs.update({"n_slices": seq_geometry["n_slices"], "tr": args.seq_tr, "te": args.seq_te})
+        _add_if_explicit(base_kwargs, args, "seq_n_echo", "n_echo")
+        _add_if_explicit(base_kwargs, args, "seq_rf_flip_deg", "rf_flip_deg")
     elif args.sequence == "epi":
         base_kwargs.update({"n_slices": seq_geometry["n_slices"]})
     elif args.sequence == "epi_se":
@@ -410,7 +419,7 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the MRI forward simulation pipeline without a UI.")
     parser.add_argument("--phantom", choices=["asymmetric", "sphere", "ring", "database"], default="asymmetric")
     parser.add_argument("--phantom-name", default=None)
-    parser.add_argument("--sequence", choices=["gre", "gre_label", "se", "epi", "epi_se", "epi_label"], default="gre_label")
+    parser.add_argument("--sequence", choices=["gre", "gre_label", "se", "tse", "epi", "epi_se", "epi_label"], default="gre_label")
     parser.add_argument("--nx", type=int, default=64)
     parser.add_argument("--ny", type=int, default=64)
     parser.add_argument("--nz", type=int, default=1)
@@ -439,6 +448,8 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seq-prephase-duration", type=float, default=None)
     parser.add_argument("--seq-n-reps", type=int, default=None)
     parser.add_argument("--seq-n-navigator", type=int, default=None)
+    parser.add_argument("--seq-n-echo", type=int, default=None)
+    parser.add_argument("--seq-rf-flip-deg", type=int, default=None)
     parser.add_argument("--fine-dt", type=float, default=1e-5)
     parser.add_argument("--radius", type=int, default=16)
     parser.add_argument("--inner-radius", type=int, default=10)

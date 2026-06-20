@@ -29,7 +29,7 @@ Available tools:
 - reconstruct_image: reconstruct an image after simulation exists.
 
 Valid phantom_type values: asymmetric, ring, sphere.
-Valid sequence_type values: gre, gre_label, se, epi, epi_se, epi_label.
+Valid sequence_type values: gre, gre_label, se, tse, epi, epi_se, epi_label.
 
 When the task is complete, respond with:
 Finish: concise final answer for the user.

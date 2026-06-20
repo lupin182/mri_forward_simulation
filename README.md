@@ -67,6 +67,18 @@ python main.py simulate --sequence gre_label --nx 64 --ny 64
 python main.py simulate --phantom asymmetric --nx 128 --ny 128 --sequence gre_label --seq-nx 64 --seq-ny 64
 ```
 
+## 当前支持的序列
+
+| 序列名 | Description |
+| --- | --- |
+| `gre` | 基础梯度回波序列，单层，支持 flip angle、RF spoiling 和 dummy scans。 |
+| `gre_label` | 带 PyPulseq label 的多层 GRE，适合作为默认完整流程序列。 |
+| `se` | 标准笛卡尔 spin echo 序列，支持 90/180 度脉冲和 readout/prephase 时长控制。 |
+| `tse` | Turbo spin echo 序列，支持 echo train、refocusing flip angle 和多层采集。 |
+| `epi` | 基础 EPI 序列，无 ramp sampling。 |
+| `epi_se` | 单层 spin-echo EPI 序列。 |
+| `epi_label` | 带 label、navigator、repetition 控制的 EPI 序列。 |
+
 ## 序列参数
 
 通用时间参数：
@@ -103,6 +115,13 @@ SE 支持：
 --seq-rf-refocusing-duration
 --seq-readout-time
 --seq-prephase-duration
+```
+
+TSE 支持：
+
+```text
+--seq-n-echo
+--seq-rf-flip-deg
 ```
 
 EPI label 支持：

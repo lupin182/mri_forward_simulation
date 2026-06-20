@@ -10,11 +10,13 @@ from .write_epi_se import write_epi_se_sequence
 from .write_gre import write_gre_sequence
 from .write_gre_label import write_gre_label_sequence
 from .write_se import write_se_sequence
+from .tse import write_tse_sequence
 
 SEQUENCE_FACTORIES: dict[str, Callable[..., object]] = {
     "gre": write_gre_sequence,
     "gre_label": write_gre_label_sequence,
     "se": write_se_sequence,
+    "tse": write_tse_sequence,
     "epi": write_epi_sequence,
     "epi_se": write_epi_se_sequence,
     "epi_label": write_epi_label_sequence,
@@ -40,4 +42,5 @@ __all__ = [
     "write_gre_label_sequence",
     "write_gre_sequence",
     "write_se_sequence",
+    "write_tse_sequence",
 ]
