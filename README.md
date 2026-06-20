@@ -14,6 +14,41 @@ pip install -r requirements.txt
 
 CuPy 是可选依赖。未安装 CuPy 或没有可用 GPU 时，项目自动使用 NumPy/CPU。
 
+## 硬件配置
+
+所有序列生成函数都会通过根目录 `.env` 中的 `MRI_SYSTEM_*` 配置创建 PyPulseq `pp.Opts` 硬件对象。系统环境变量优先级高于 `.env`；如果二者都没有配置，则使用代码内保守默认值。
+
+推荐配置：
+
+```text
+MRI_SYSTEM_MAX_GRAD=32
+MRI_SYSTEM_GRAD_UNIT=mT/m
+MRI_SYSTEM_MAX_SLEW=130
+MRI_SYSTEM_SLEW_UNIT=T/m/s
+MRI_SYSTEM_RF_RINGDOWN_TIME=20e-6
+MRI_SYSTEM_RF_DEAD_TIME=100e-6
+MRI_SYSTEM_ADC_DEAD_TIME=10e-6
+```
+
+参数说明：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `MRI_SYSTEM_MAX_GRAD` | `32` | 最大梯度强度。 |
+| `MRI_SYSTEM_GRAD_UNIT` | `mT/m` | 最大梯度强度单位，传给 PyPulseq `grad_unit`。 |
+| `MRI_SYSTEM_MAX_SLEW` | `130` | 最大 slew rate。 |
+| `MRI_SYSTEM_SLEW_UNIT` | `T/m/s` | slew rate 单位，传给 PyPulseq `slew_unit`。 |
+| `MRI_SYSTEM_RF_RINGDOWN_TIME` | `20e-6` | RF ringdown 时间，单位秒。 |
+| `MRI_SYSTEM_RF_DEAD_TIME` | `100e-6` | RF dead time，单位秒。 |
+| `MRI_SYSTEM_ADC_DEAD_TIME` | `10e-6` | ADC dead time，单位秒。 |
+
+如果需要模拟更强硬件，可以在 `.env` 中改为例如：
+
+```text
+MRI_SYSTEM_MAX_GRAD=120
+MRI_SYSTEM_MAX_SLEW=200
+```
+
 ## 基本模拟
 
 默认运行完整前向模拟：

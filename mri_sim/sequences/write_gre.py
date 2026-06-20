@@ -1,6 +1,8 @@
 import numpy as np
 import pypulseq as pp
 
+from mri_sim.system_config import get_pypulseq_system
+
 
 def write_gre_sequence(
     fov: float | tuple[float, float] = 256e-3,
@@ -45,16 +47,7 @@ def write_gre_sequence(
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
     rf_spoiling_inc = rf_spoiling_inc_deg
 
-    # Set system limits
-    system = pp.Opts(
-        max_grad=120,
-        grad_unit='mT/m',
-        max_slew=200,
-        slew_unit='T/m/s',
-        rf_ringdown_time=20e-6,
-        rf_dead_time=100e-6,
-        adc_dead_time=10e-6,
-    )
+    system = get_pypulseq_system()
 
     seq = pp.Sequence(system)
 

@@ -1,6 +1,8 @@
 import numpy as np
 import pypulseq as pp
 
+from mri_sim.system_config import get_pypulseq_system
+
 
 def write_epi_sequence(
     fov: float | tuple[float, float] = 220e-3,
@@ -32,15 +34,7 @@ def write_epi_sequence(
     """
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
 
-    # Set system limits
-    system = pp.Opts(
-        max_grad=32,
-        grad_unit='mT/m',
-        max_slew=130,
-        slew_unit='T/m/s',
-        rf_ringdown_time=30e-6,
-        rf_dead_time=100e-6,
-    )
+    system = get_pypulseq_system()
 
     seq = pp.Sequence(system)
 

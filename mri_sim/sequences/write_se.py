@@ -3,6 +3,8 @@ import math
 import numpy as np
 import pypulseq as pp
 
+from mri_sim.system_config import get_pypulseq_system
+
 
 def _round_up_to_raster(value: float, raster: float) -> float:
     if value < 0:
@@ -80,15 +82,7 @@ def write_se_sequence(
 
     fov_x, fov_y = (fov, fov) if isinstance(fov, (int, float)) else fov
 
-    system = pp.Opts(
-        max_grad=32,
-        grad_unit='mT/m',
-        max_slew=130,
-        slew_unit='T/m/s',
-        rf_ringdown_time=20e-6,
-        rf_dead_time=100e-6,
-        adc_dead_time=10e-6,
-    )
+    system = get_pypulseq_system()
     seq = pp.Sequence(system)
 
     rf_exc, gz_exc, _ = pp.make_sinc_pulse(
