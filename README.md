@@ -84,6 +84,10 @@ MRI Forward Simulation 是一个磁共振成像前向模拟项目，围绕 **体
 | 🖥️ | **交互入口** | <ul><li>CLI 覆盖完整模拟与数据库管理。</li><li>Tkinter GUI 支持表单、进度条、结果历史和硬件配置。</li><li>ReAct Agent 与 Streamlit UI 支持自然语言驱动模拟流程。</li></ul> |
 
 <p align="center">
+	<img src="assets/readme/gui.png" width="88%" alt="MRI local GUI workstation">
+</p>
+
+<p align="center">
 	<img src="assets/readme/demo-result.png" width="88%" alt="MRI smoke simulation demo">
 </p>
 
@@ -103,6 +107,7 @@ MRI Forward Simulation 是一个磁共振成像前向模拟项目，围绕 **体
     │       ├── logo.png
     │       ├── title.png
     │       ├── workflow.png
+    │       ├── gui.png
     │       └── demo-result.png
     ├── agent/
     │   ├── config.py
