@@ -65,6 +65,24 @@ python main.py simulate --sequence gre_label --phantom asymmetric --nx 64 --ny 6
 
 输出目录默认是 `output/`，包含 `kspace.npy`、`reconstruction.npy`、`reconstruction_magnitude.npy`、`summary.json` 和可选 PNG。
 
+## 本地桌面 GUI
+
+除智能代理外的主要功能也可以通过本地窗口界面使用：
+
+```powershell
+python main.py gui
+```
+
+GUI 使用 Python 内置 Tkinter，不需要额外安装 Qt。界面包含：
+
+- `Simulation`：体模、序列、序列数据库、RF/B0 伪影、输出目录和完整前向模拟。
+- `Phantom Database`：体模数据库 list/create/load/delete。
+- `Sequence Database`：`.seq` 序列数据库 list/load/delete。
+- `Hardware Config`：编辑根目录 `.env` 中的 `MRI_SYSTEM_*` 硬件参数。
+- `Results`：查看当前运行结果和 `output/` 中已有历史结果。
+
+模拟在后台子进程中运行，运行期间窗口不会卡死；`Cancel` 会终止当前模拟进程。
+
 ## 体模参数与序列参数
 
 体模几何参数：

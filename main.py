@@ -582,6 +582,7 @@ def build_root_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="MRI forward simulation and agent platform.")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("simulate", help="Run the MRI forward simulation CLI.")
+    subparsers.add_parser("gui", help="Start the local desktop GUI for non-agent MRI workflows.")
     subparsers.add_parser("agent-cli", help="Run the ReAct agent in an interactive terminal.")
     agent_ui = subparsers.add_parser("agent-ui", help="Start the Streamlit agent UI.")
     agent_ui.add_argument("--server-port", type=int, default=None)
@@ -602,6 +603,14 @@ def run_agent_ui(argv: list[str]) -> None:
     if args.server_address is not None:
         command.extend(["--server.address", args.server_address])
     subprocess.run(command, check=True)
+
+
+def run_local_gui(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description="Start the local desktop MRI GUI.")
+    parser.parse_args(argv)
+    from mri_sim.gui_app import main as run_gui
+
+    run_gui()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -628,6 +637,9 @@ def main(argv: list[str] | None = None) -> None:
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return
         args = parse_simulation_args(argv[1:])
+    elif argv and argv[0] == "gui":
+        run_local_gui(argv[1:])
+        return
     elif argv and argv[0] == "agent-cli":
         from agent.react_agent import run_interactive_cli
 
