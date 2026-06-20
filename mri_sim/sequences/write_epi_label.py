@@ -10,11 +10,6 @@ import pypulseq as pp
 
 
 def write_epi_label_sequence(
-    plot: bool = False,
-    test_report: bool = False,
-    write_seq: bool = False,
-    seq_filename: str = 'epi_label_pypulseq.seq',
-    *,
     fov: float | tuple[float, float] = 220e-3,
     n_x: int = 64,
     n_y: int = 64,
@@ -27,14 +22,6 @@ def write_epi_label_sequence(
 
     Parameters
     ----------
-    plot : bool, optional
-        Plot the sequence diagram. Default is False.
-    test_report : bool, optional
-        Print a test report. Default is False.
-    write_seq : bool, optional
-        Write the sequence to a .seq file. Default is False.
-    seq_filename : str, optional
-        Output filename for the .seq file. Default is 'epi_label_pypulseq.seq'.
     fov : float or tuple of float, optional
         Field of view in meters. If a single value, it is used for both x and y.
         If a tuple, it is (fov_x, fov_y). Default is 220e-3.
@@ -182,17 +169,8 @@ def write_epi_label_sequence(
         print('Timing check failed. Error listing follows:')
         [print(e) for e in error_report]
 
-    if test_report:
-        print(seq.test_report())
-
-    if plot:
-        seq.plot(time_range=(0, 0.1), time_disp='ms', label='SEG, LIN, SLC')
-
     seq.set_definition(key='FOV', value=[fov_x, fov_y, slice_thickness * n_slices])
     seq.set_definition(key='Name', value='epi_lbl')
-
-    if write_seq:
-        seq.write(seq_filename)
 
     return seq
 

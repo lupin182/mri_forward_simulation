@@ -36,6 +36,75 @@ DEFAULT_OUTPUT_DIR = Path("output")
 DEFAULT_FOV_X = 0.256
 DEFAULT_FOV_Y = 0.256
 DEFAULT_SLICE_THICKNESS = 0.004
+SEQUENCE_SPECIFIC_ARGUMENTS = {
+    "seq_tr",
+    "seq_te",
+    "seq_flip_angle_deg",
+    "seq_rf_spoiling_inc_deg",
+    "seq_dummy_scans",
+    "seq_ideal_spoiling_reset",
+    "seq_readout_duration",
+    "seq_excitation_flip_angle_deg",
+    "seq_refocusing_flip_angle_deg",
+    "seq_rf_excitation_duration",
+    "seq_rf_refocusing_duration",
+    "seq_readout_time",
+    "seq_prephase_duration",
+    "seq_n_reps",
+    "seq_n_navigator",
+}
+SEQUENCE_SUPPORTED_ARGUMENTS = {
+    "gre": {
+        "seq_tr",
+        "seq_te",
+        "seq_flip_angle_deg",
+        "seq_rf_spoiling_inc_deg",
+        "seq_dummy_scans",
+        "seq_ideal_spoiling_reset",
+    },
+    "gre_label": {
+        "seq_tr",
+        "seq_te",
+        "seq_flip_angle_deg",
+        "seq_rf_spoiling_inc_deg",
+        "seq_dummy_scans",
+        "seq_ideal_spoiling_reset",
+        "seq_readout_duration",
+    },
+    "se": {
+        "seq_tr",
+        "seq_te",
+        "seq_excitation_flip_angle_deg",
+        "seq_refocusing_flip_angle_deg",
+        "seq_rf_excitation_duration",
+        "seq_rf_refocusing_duration",
+        "seq_readout_time",
+        "seq_prephase_duration",
+    },
+    "epi": set(),
+    "epi_se": {"seq_te"},
+    "epi_label": {"seq_n_reps", "seq_n_navigator"},
+}
+SEQUENCE_OPTION_DESTS = {
+    "--seq-n-slices": "seq_n_slices",
+    "--seq-tr": "seq_tr",
+    "--seq-te": "seq_te",
+    "--seq-flip-angle-deg": "seq_flip_angle_deg",
+    "--seq-rf-spoiling-inc-deg": "seq_rf_spoiling_inc_deg",
+    "--seq-dummy-scans": "seq_dummy_scans",
+    "--seq-ideal-spoiling-reset": "seq_ideal_spoiling_reset",
+    "--no-seq-ideal-spoiling-reset": "seq_ideal_spoiling_reset",
+    "--seq-readout-duration": "seq_readout_duration",
+    "--seq-excitation-flip-angle-deg": "seq_excitation_flip_angle_deg",
+    "--seq-refocusing-flip-angle-deg": "seq_refocusing_flip_angle_deg",
+    "--seq-rf-excitation-duration": "seq_rf_excitation_duration",
+    "--seq-rf-refocusing-duration": "seq_rf_refocusing_duration",
+    "--seq-readout-time": "seq_readout_time",
+    "--seq-prephase-duration": "seq_prephase_duration",
+    "--seq-n-reps": "seq_n_reps",
+    "--seq-n-navigator": "seq_n_navigator",
+}
+SEQUENCE_N_SLICES_SUPPORTED = {"gre_label", "se", "epi", "epi_label"}
 
 
 def _parse_csv_floats(value: str) -> list[float]:
@@ -95,26 +164,80 @@ def _build_phantom(args: argparse.Namespace) -> tuple[Phantom, np.ndarray, np.nd
     return phantom, rho, t1, t2
 
 
+def _explicit_args(args: argparse.Namespace) -> set[str]:
+    return getattr(args, "_explicit_args", set())
+
+
+def _effective_sequence_geometry(args: argparse.Namespace, phantom: Phantom) -> dict[str, int | float]:
+    if "seq_n_slices" in _explicit_args(args) and args.sequence not in SEQUENCE_N_SLICES_SUPPORTED:
+        raise ValueError(f"{args.sequence} does not support sequence argument(s): --seq-n-slices")
+    n_slices = args.seq_n_slices if args.seq_n_slices is not None else phantom.Nz
+    if args.sequence not in SEQUENCE_N_SLICES_SUPPORTED:
+        n_slices = 1
+    return {
+        "nx": int(args.seq_nx if args.seq_nx is not None else phantom.Nx),
+        "ny": int(args.seq_ny if args.seq_ny is not None else phantom.Ny),
+        "n_slices": int(n_slices),
+        "fov_x": float(args.seq_fov_x if args.seq_fov_x is not None else phantom.fov_x),
+        "fov_y": float(args.seq_fov_y if args.seq_fov_y is not None else phantom.fov_y),
+        "slice_thickness": float(
+            args.seq_slice_thickness if args.seq_slice_thickness is not None else phantom.slice_thickness
+        ),
+    }
+
+
+def _validate_sequence_specific_args(args: argparse.Namespace) -> None:
+    explicit_specific = getattr(args, "_explicit_seq_args", set()) & SEQUENCE_SPECIFIC_ARGUMENTS
+    unsupported = sorted(explicit_specific - SEQUENCE_SUPPORTED_ARGUMENTS[args.sequence])
+    if unsupported:
+        options = ", ".join(f"--{name.replace('_', '-')}" for name in unsupported)
+        raise ValueError(f"{args.sequence} does not support sequence argument(s): {options}")
+
+
+def _add_if_explicit(kwargs: dict[str, Any], args: argparse.Namespace, attr: str, target: str) -> None:
+    if attr in _explicit_args(args):
+        kwargs[target] = getattr(args, attr)
+
+
 def _build_sequence(args: argparse.Namespace, phantom: Phantom):
+    _validate_sequence_specific_args(args)
+    seq_geometry = _effective_sequence_geometry(args, phantom)
     base_kwargs: dict[str, Any] = {
-        "fov": (phantom.fov_x, phantom.fov_y),
-        "n_x": phantom.Nx,
-        "n_y": phantom.Ny,
-        "slice_thickness": phantom.slice_thickness,
+        "fov": (seq_geometry["fov_x"], seq_geometry["fov_y"]),
+        "n_x": seq_geometry["nx"],
+        "n_y": seq_geometry["ny"],
+        "slice_thickness": seq_geometry["slice_thickness"],
     }
     if args.sequence == "gre":
-        base_kwargs.update({"tr": args.tr, "te": args.te})
+        base_kwargs.update({"tr": args.seq_tr, "te": args.seq_te})
+        _add_if_explicit(base_kwargs, args, "seq_flip_angle_deg", "flip_angle_deg")
+        _add_if_explicit(base_kwargs, args, "seq_rf_spoiling_inc_deg", "rf_spoiling_inc_deg")
+        _add_if_explicit(base_kwargs, args, "seq_dummy_scans", "dummy_scans")
+        _add_if_explicit(base_kwargs, args, "seq_ideal_spoiling_reset", "ideal_spoiling_reset")
     elif args.sequence == "gre_label":
-        base_kwargs.update({"n_slices": phantom.Nz, "tr": args.tr, "te": args.te})
+        base_kwargs.update({"n_slices": seq_geometry["n_slices"], "tr": args.seq_tr, "te": args.seq_te})
+        _add_if_explicit(base_kwargs, args, "seq_flip_angle_deg", "flip_angle_deg")
+        _add_if_explicit(base_kwargs, args, "seq_rf_spoiling_inc_deg", "rf_spoiling_inc_deg")
+        _add_if_explicit(base_kwargs, args, "seq_dummy_scans", "dummy_scans")
+        _add_if_explicit(base_kwargs, args, "seq_ideal_spoiling_reset", "ideal_spoiling_reset")
+        _add_if_explicit(base_kwargs, args, "seq_readout_duration", "readout_duration")
     elif args.sequence == "se":
-        base_kwargs.update({"n_slices": phantom.Nz, "tr": args.tr, "te": args.te})
+        base_kwargs.update({"n_slices": seq_geometry["n_slices"], "tr": args.seq_tr, "te": args.seq_te})
+        _add_if_explicit(base_kwargs, args, "seq_excitation_flip_angle_deg", "excitation_flip_angle_deg")
+        _add_if_explicit(base_kwargs, args, "seq_refocusing_flip_angle_deg", "refocusing_flip_angle_deg")
+        _add_if_explicit(base_kwargs, args, "seq_rf_excitation_duration", "rf_excitation_duration")
+        _add_if_explicit(base_kwargs, args, "seq_rf_refocusing_duration", "rf_refocusing_duration")
+        _add_if_explicit(base_kwargs, args, "seq_readout_time", "readout_time")
+        _add_if_explicit(base_kwargs, args, "seq_prephase_duration", "prephase_duration")
     elif args.sequence == "epi":
-        base_kwargs.update({"n_slices": phantom.Nz})
+        base_kwargs.update({"n_slices": seq_geometry["n_slices"]})
     elif args.sequence == "epi_se":
-        base_kwargs.update({"te": args.te})
+        base_kwargs.update({"te": args.seq_te})
     elif args.sequence == "epi_label":
-        base_kwargs.update({"n_slices": phantom.Nz})
-    return get_sequence(args.sequence, **base_kwargs)
+        base_kwargs.update({"n_slices": seq_geometry["n_slices"]})
+        _add_if_explicit(base_kwargs, args, "seq_n_reps", "n_reps")
+        _add_if_explicit(base_kwargs, args, "seq_n_navigator", "n_navigator")
+    return get_sequence(args.sequence, **base_kwargs), seq_geometry
 
 
 def _as_reconstruction_input(kspace: np.ndarray) -> np.ndarray:
@@ -124,13 +247,20 @@ def _as_reconstruction_input(kspace: np.ndarray) -> np.ndarray:
     return signal.squeeze()
 
 
-def _reconstruct(kspace: np.ndarray, k_traj_adc: np.ndarray, phantom: Phantom) -> tuple[np.ndarray, np.ndarray]:
+def _reconstruct(
+    kspace: np.ndarray,
+    k_traj_adc: np.ndarray,
+    *,
+    nx: int,
+    ny: int,
+    nz: int,
+) -> tuple[np.ndarray, np.ndarray]:
     coil_images, k_grid = reconstruct_3d_cartesian_fft_multichannel(
         _as_reconstruction_input(kspace),
         k_traj_adc,
-        Ny=phantom.Ny,
-        Nx=phantom.Nx,
-        Nz=phantom.Nz,
+        Ny=ny,
+        Nx=nx,
+        Nz=nz,
     )
     if coil_images.ndim == 4:
         image = sos_reconstruction(coil_images)
@@ -211,11 +341,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     phantom, rho, _, _ = _build_phantom(args)
-    sequence = _build_sequence(args, phantom)
+    sequence, sequence_geometry = _build_sequence(args, phantom)
 
     kspace = simulate(phantom, sequence, SimulationConfig(fine_dt=args.fine_dt))
     k_traj_adc, _, _, _, _ = sequence.calculate_kspace()
-    image, _ = _reconstruct(kspace, k_traj_adc, phantom)
+    image, _ = _reconstruct(
+        kspace,
+        k_traj_adc,
+        nx=int(sequence_geometry["nx"]),
+        ny=int(sequence_geometry["ny"]),
+        nz=int(sequence_geometry["n_slices"]),
+    )
 
     np.save(output_dir / "kspace.npy", kspace)
     np.save(output_dir / "reconstruction.npy", image)
@@ -227,7 +363,18 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "phantom": args.phantom,
         "phantom_name": args.phantom_name,
         "sequence": args.sequence,
-        "shape": {"nz": phantom.Nz, "nx": phantom.Nx, "ny": phantom.Ny},
+        "shape": {"nz": int(sequence_geometry["n_slices"]), "nx": int(sequence_geometry["nx"]), "ny": int(sequence_geometry["ny"])},
+        "phantom_shape": {"nz": phantom.Nz, "nx": phantom.Nx, "ny": phantom.Ny},
+        "sequence_shape": {
+            "nz": int(sequence_geometry["n_slices"]),
+            "nx": int(sequence_geometry["nx"]),
+            "ny": int(sequence_geometry["ny"]),
+        },
+        "sequence_fov": {
+            "fov_x": float(sequence_geometry["fov_x"]),
+            "fov_y": float(sequence_geometry["fov_y"]),
+            "slice_thickness": float(sequence_geometry["slice_thickness"]),
+        },
         "kspace_shape": list(np.asarray(kspace).shape),
         "reconstruction_shape": list(np.asarray(image).shape),
         "output_dir": str(output_dir.resolve()),
@@ -238,7 +385,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     if args.rf_artifact:
         _, _, _, t_adc, _ = sequence.waveforms_and_times()
         artifact_kspace = _add_rf_artifact(args, np.asarray(t_adc), np.asarray(kspace))
-        artifact_image, _ = _reconstruct(artifact_kspace, k_traj_adc, phantom)
+        artifact_image, _ = _reconstruct(
+            artifact_kspace,
+            k_traj_adc,
+            nx=int(sequence_geometry["nx"]),
+            ny=int(sequence_geometry["ny"]),
+            nz=int(sequence_geometry["n_slices"]),
+        )
         np.save(output_dir / "kspace_rf_artifact.npy", artifact_kspace)
         np.save(output_dir / "reconstruction_rf_artifact.npy", artifact_image)
         np.save(output_dir / "reconstruction_rf_artifact_magnitude.npy", np.abs(artifact_image))
@@ -264,8 +417,28 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fov-x", type=float, default=None)
     parser.add_argument("--fov-y", type=float, default=None)
     parser.add_argument("--slice-thickness", type=float, default=None)
-    parser.add_argument("--tr", type=float, default=0.1)
-    parser.add_argument("--te", type=float, default=0.02)
+    parser.add_argument("--seq-nx", type=int, default=None)
+    parser.add_argument("--seq-ny", type=int, default=None)
+    parser.add_argument("--seq-n-slices", type=int, default=None)
+    parser.add_argument("--seq-fov-x", type=float, default=None)
+    parser.add_argument("--seq-fov-y", type=float, default=None)
+    parser.add_argument("--seq-slice-thickness", type=float, default=None)
+    parser.add_argument("--tr", "--seq-tr", dest="seq_tr", type=float, default=0.1)
+    parser.add_argument("--te", "--seq-te", dest="seq_te", type=float, default=0.02)
+    parser.add_argument("--seq-flip-angle-deg", type=float, default=None)
+    parser.add_argument("--seq-rf-spoiling-inc-deg", type=float, default=None)
+    parser.add_argument("--seq-dummy-scans", type=int, default=None)
+    parser.add_argument("--seq-ideal-spoiling-reset", dest="seq_ideal_spoiling_reset", action="store_true", default=None)
+    parser.add_argument("--no-seq-ideal-spoiling-reset", dest="seq_ideal_spoiling_reset", action="store_false")
+    parser.add_argument("--seq-readout-duration", type=float, default=None)
+    parser.add_argument("--seq-excitation-flip-angle-deg", type=float, default=None)
+    parser.add_argument("--seq-refocusing-flip-angle-deg", type=float, default=None)
+    parser.add_argument("--seq-rf-excitation-duration", type=float, default=None)
+    parser.add_argument("--seq-rf-refocusing-duration", type=float, default=None)
+    parser.add_argument("--seq-readout-time", type=float, default=None)
+    parser.add_argument("--seq-prephase-duration", type=float, default=None)
+    parser.add_argument("--seq-n-reps", type=int, default=None)
+    parser.add_argument("--seq-n-navigator", type=int, default=None)
     parser.add_argument("--fine-dt", type=float, default=1e-5)
     parser.add_argument("--radius", type=int, default=16)
     parser.add_argument("--inner-radius", type=int, default=10)
@@ -282,6 +455,15 @@ def build_simulation_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--no-plot", action="store_true")
     return parser
+
+
+def parse_simulation_args(argv: list[str]) -> argparse.Namespace:
+    parser = build_simulation_parser()
+    args = parser.parse_args(argv)
+    explicit_options = {item.split("=", 1)[0] for item in argv if item.startswith("--")}
+    args._explicit_args = {dest for option, dest in SEQUENCE_OPTION_DESTS.items() if option in explicit_options}
+    args._explicit_seq_args = set(args._explicit_args)
+    return args
 
 
 def build_database_parser() -> argparse.ArgumentParser:
@@ -365,7 +547,7 @@ def main(argv: list[str] | None = None) -> None:
             result = run_database_command(args)
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return
-        args = build_simulation_parser().parse_args(argv[1:])
+        args = parse_simulation_args(argv[1:])
     elif argv and argv[0] == "agent-cli":
         from agent.react_agent import run_interactive_cli
 
@@ -381,9 +563,13 @@ def main(argv: list[str] | None = None) -> None:
         build_root_parser().parse_args(argv)
         return
     else:
-        args = build_simulation_parser().parse_args(argv)
+        args = parse_simulation_args(argv)
 
-    summary = run_pipeline(args)
+    try:
+        summary = run_pipeline(args)
+    except (ValueError, AssertionError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
